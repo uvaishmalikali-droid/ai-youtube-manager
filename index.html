@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI YouTube Manager</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#10131d;color:white;
+ font-family:Arial,sans-serif;padding:20px
+}
+.container{max-width:650px;margin:auto}
+h1{color:#ff4444;text-align:center}
+.card{
+ background:#1d2332;padding:18px;
+ border-radius:14px;margin:15px 0
+}
+input,textarea,select{
+ width:100%;padding:13px;margin:8px 0;
+ border:1px solid #444;border-radius:8px;
+ background:#101522;color:white
+}
+button{
+ background:#ff3333;color:white;border:0;
+ padding:13px;border-radius:8px;
+ width:100%;font-weight:bold;margin-top:10px
+}
+button:disabled{opacity:.5}
+.preview{max-width:100%;margin-top:10px}
+.small{color:#aab2c5;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>▶ AI YouTube Manager</h1>
+<p style="text-align:center">Your Personal YouTube Dashboard</p>
+
+<div class="card">
+<h3>📺 Connect YouTube Channel</h3>
+<button onclick="connect()">Connect with Google</button>
+<p class="small" id="status">
+YouTube channel not connected
+</p>
+</div>
+
+<div class="card">
+<h3>🎬 Select Video</h3>
+<input type="file" id="video" accept="video/*">
+<video id="videoPreview" class="preview" controls hidden></video>
+</div>
+
+<div class="card">
+<h3>🖼 Select Thumbnail</h3>
+<input type="file" id="thumb" accept="image/*">
+<img id="thumbPreview" class="preview" hidden>
+</div>
+
+<div class="card">
+<h3>✍️ Video
