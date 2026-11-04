@@ -1,41 +1,229 @@
+
 <!DOCTYPE html>
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI YouTube Manager</title>
+
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#10131d;color:white;font-family:Arial,sans-serif;padding:18px}
+body{
+ margin:0;
+ background:#10131d;
+ color:white;
+ font-family:Arial,sans-serif;
+ padding:18px;
+}
 .container{max-width:650px;margin:auto}
 h1{text-align:center;color:#ff4444}
-.card{background:#1d2332;padding:18px;border-radius:14px;margin:15px 0}
-button{background:#ff3333;color:white;border:0;padding:13px 18px;border-radius:8px;font-size:16px;cursor:pointer}
-input,textarea,select{width:100%;padding:12px;margin:10px 0;background:#10131d;color:white;border:1px solid #555;border-radius:8px}
-textarea{min-height:100px}
-.preview{max-width:100%;margin-top:10px;border-radius:8px}
+.card{
+ background:#1d2332;
+ padding:18px;
+ border-radius:14px;
+ margin:15px 0;
+}
+button{
+ background:#ff3333;
+ color:white;
+ border:0;
+ padding:13px 18px;
+ border-radius:8px;
+ font-size:16px;
+ cursor:pointer;
+}
+input,textarea,select{
+ width:100%;
+ padding:12px;
+ margin:10px 0;
+ background:#10131d;
+ color:white;
+ border:1px solid #555;
+ border-radius:8px;
+}
+textarea{min-height:150px}
+.preview{
+ max-width:100%;
+ width:100%;
+ margin-top:10px;
+ border-radius:8px;
+}
 .small{color:#aaa;font-size:13px}
+.status{color:#55dd88}
 </style>
 </head>
+
 <body>
 <div class="container">
+
 <h1>▶ AI YouTube Manager</h1>
-<p style="text-align:center">Your Personal YouTube Dashboard</p>
+<p style="text-align:center">
+Your Personal YouTube Dashboard
+</p>
 
 <div class="card">
 <h3>🔴 Connect YouTube Channel</h3>
 <p id="connection">YouTube channel not connected</p>
-<button onclick="connect()">Connect YouTube</button>
+<button onclick="connect()">
+Connect YouTube
+</button>
+<p class="small">
+YouTube OAuth connection will be enabled after backend setup.
+</p>
 </div>
 
 <div class="card">
 <h3>🤖 AI Video Script</h3>
+
 <input id="topic" placeholder="Enter your video topic">
-<button onclick="generateScript()">Generate Script</button>
-<textarea id="script" placeholder="Your video script will appear here"></textarea>
+
+<button onclick="generateScript()">
+Generate Script
+</button>
+
+<textarea id="script"
+placeholder="Your video script will appear here">
+</textarea>
+
+<p class="small">
+Script generation is currently a demo. AI API connection is still pending.
+</p>
 </div>
 
 <div class="card">
 <h3>🎬 Select Video</h3>
+
 <input type="file" id="video" accept="video/*">
-<video id="videoPreview" class="previ
+
+<video id="videoPreview"
+class="preview"
+controls
+style="display:none">
+</video>
+
+<p id="videoStatus" class="small">
+No video selected
+</p>
+</div>
+
+<div class="card">
+<h3>📡 Backend Status</h3>
+
+<p id="backendStatus">Checking server...</p>
+
+<button onclick="checkBackend()">
+Check Backend
+</button>
+</div>
+
+<div class="card">
+<h3>📊 Dashboard</h3>
+<p>Welcome to AI YouTube Manager!</p>
+<p class="status">Dashboard Loaded Successfully</p>
+</div>
+
+</div>
+
+<script>
+
+const API_URL =
+"https://ai-youtube-manager-iw6j.onrender.com";
+
+function connect(){
+ alert(
+ "YouTube OAuth is not configured yet. We will connect it after backend setup."
+ );
+}
+
+function generateScript(){
+
+ const topic =
+ document.getElementById("topic").value.trim();
+
+ if(!topic){
+  alert("Please enter your video topic.");
+  return;
+ }
+
+ const result =
+ `Title: ${topic}
+
+Introduction:
+Hello friends! Welcome to our YouTube channel.
+
+Main Content:
+Today we are going to talk about ${topic}.
+
+First, let's understand the basics.
+Then we will discuss the important points.
+Finally, we will share some useful tips.
+
+Conclusion:
+Thank you for watching!
+Please Like, Share and Subscribe.
+
+`;
+
+ document.getElementById("script").value=result;
+
+}
+
+document.getElementById("video").addEventListener(
+ "change",
+ function(){
+
+  const file=this.files[0];
+
+  if(!file)return;
+
+  const url=URL.createObjectURL(file);
+
+  const preview=
+  document.getElementById("videoPreview");
+
+  preview.src=url;
+  preview.style.display="block";
+
+  document.getElementById("videoStatus").textContent=
+  "Selected: "+file.name;
+
+ }
+);
+
+async function checkBackend(){
+
+ const status=
+ document.getElementById("backendStatus");
+
+ status.textContent="Checking...";
+
+ try{
+
+  const response=await fetch(
+   API_URL+"/api/health"
+  );
+
+  if(!response.ok){
+   throw new Error("Server error");
+  }
+
+  const data=await response.json();
+
+  status.textContent=
+  data.message+" Status: "+data.status;
+
+ }catch(error){
+
+  status.textContent=
+  "Backend connection failed. Please try again.";
+
+ }
+
+}
+
+checkBackend();
+
+</script>
+
+</body>
+</html>
