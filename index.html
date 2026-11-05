@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -8,6 +7,7 @@
 
 <style>
 *{box-sizing:border-box}
+
 body{
  margin:0;
  background:#10131d;
@@ -15,14 +15,18 @@ body{
  font-family:Arial,sans-serif;
  padding:18px;
 }
+
 .container{max-width:650px;margin:auto}
+
 h1{text-align:center;color:#ff4444}
+
 .card{
  background:#1d2332;
  padding:18px;
  border-radius:14px;
  margin:15px 0;
 }
+
 button{
  background:#ff3333;
  color:white;
@@ -32,6 +36,9 @@ button{
  font-size:16px;
  cursor:pointer;
 }
+
+button:disabled{opacity:.6}
+
 input,textarea,select{
  width:100%;
  padding:12px;
@@ -41,13 +48,16 @@ input,textarea,select{
  border:1px solid #555;
  border-radius:8px;
 }
+
 textarea{min-height:150px}
+
 .preview{
  max-width:100%;
  width:100%;
  margin-top:10px;
  border-radius:8px;
 }
+
 .small{color:#aaa;font-size:13px}
 .status{color:#55dd88}
 </style>
@@ -57,25 +67,32 @@ textarea{min-height:150px}
 <div class="container">
 
 <h1>▶ AI YouTube Manager</h1>
+
 <p style="text-align:center">
 Your Personal YouTube Dashboard
 </p>
 
 <div class="card">
 <h3>🔴 Connect YouTube Channel</h3>
-<p id="connection">YouTube channel not connected</p>
+
+<p id="connection">
+YouTube channel not connected
+</p>
+
 <button onclick="connect()">
 Connect YouTube
 </button>
+
 <p class="small">
-YouTube OAuth connection will be enabled after backend setup.
+Connect your Google account to continue.
 </p>
 </div>
 
 <div class="card">
 <h3>🤖 AI Video Script</h3>
 
-<input id="topic" placeholder="Enter your video topic">
+<input id="topic"
+placeholder="Enter your video topic">
 
 <button onclick="generateScript()">
 Generate Script
@@ -86,14 +103,16 @@ placeholder="Your video script will appear here">
 </textarea>
 
 <p class="small">
-Script generation is currently a demo. AI API connection is still pending.
+Script generation is currently a demo.
 </p>
 </div>
 
 <div class="card">
 <h3>🎬 Select Video</h3>
 
-<input type="file" id="video" accept="video/*">
+<input type="file"
+id="video"
+accept="video/*">
 
 <video id="videoPreview"
 class="preview"
@@ -109,7 +128,9 @@ No video selected
 <div class="card">
 <h3>📡 Backend Status</h3>
 
-<p id="backendStatus">Checking server...</p>
+<p id="backendStatus">
+Checking server...
+</p>
 
 <button onclick="checkBackend()">
 Check Backend
@@ -118,8 +139,12 @@ Check Backend
 
 <div class="card">
 <h3>📊 Dashboard</h3>
+
 <p>Welcome to AI YouTube Manager!</p>
-<p class="status">Dashboard Loaded Successfully</p>
+
+<p class="status">
+Dashboard Loaded Successfully
+</p>
 </div>
 
 </div>
@@ -130,9 +155,13 @@ const API_URL =
 "https://ai-youtube-manager-iw6j.onrender.com";
 
 function connect(){
- alert(
- "YouTube OAuth is not configured yet. We will connect it after backend setup."
- );
+
+ document.getElementById("connection").textContent =
+ "Connecting to Google...";
+
+ window.location.href =
+ API_URL + "/auth/google";
+
 }
 
 function generateScript(){
@@ -161,7 +190,6 @@ Finally, we will share some useful tips.
 Conclusion:
 Thank you for watching!
 Please Like, Share and Subscribe.
-
 `;
 
  document.getElementById("script").value=result;
@@ -176,6 +204,11 @@ document.getElementById("video").addEventListener(
 
   if(!file)return;
 
+  if(!file.type.startsWith("video/")){
+   alert("Please select a video file.");
+   return;
+  }
+
   const url=URL.createObjectURL(file);
 
   const preview=
@@ -184,7 +217,7 @@ document.getElementById("video").addEventListener(
   preview.src=url;
   preview.style.display="block";
 
-  document.getElementById("videoStatus").textContent=
+  document.getElementById("videoStatus").textContent =
   "Selected: "+file.name;
 
  }
@@ -192,7 +225,7 @@ document.getElementById("video").addEventListener(
 
 async function checkBackend(){
 
- const status=
+ const status =
  document.getElementById("backendStatus");
 
  status.textContent="Checking...";
@@ -209,12 +242,12 @@ async function checkBackend(){
 
   const data=await response.json();
 
-  status.textContent=
+  status.textContent =
   data.message+" Status: "+data.status;
 
  }catch(error){
 
-  status.textContent=
+  status.textContent =
   "Backend connection failed. Please try again.";
 
  }
