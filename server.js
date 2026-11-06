@@ -293,7 +293,7 @@ app.get("/auth/google/callback", async (req, res) => {
       channel:
         channelData.items[0].snippet?.title || "YouTube Channel",
       channelId: channelData.items[0].id
-    };
+    };    await saveYouTubeConnection(youtubeConnection);
 
     const safeChannel = String(youtubeConnection.channel)
       .replace(/&/g, "&amp;")
