@@ -250,10 +250,30 @@ async function checkBackend(){
   status.textContent =
   "Backend connection failed. Please try again.";
 
- }
-
+ } 
+ 
 }
+async function checkYouTubeStatus(){
 
+ const connection = document.getElementById("connection");
+
+ try{
+  const response = await fetch(API_URL + "/api/youtube/status");
+  const data = await response.json();
+
+  if(data.connected){
+   connection.textContent =
+   "YouTube Connected Successfully! Channel: " + data.channel;
+   connection.classList.add("status");
+  }else{
+   connection.textContent = "YouTube channel not connected";
+  }
+
+ }catch(error){
+  connection.textContent = "Could not check YouTube connection.";
+ checkYouTubeStatus();
+ }
+}
 checkBackend();
 
 </script>
