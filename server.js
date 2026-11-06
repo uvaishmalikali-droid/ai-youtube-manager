@@ -4,7 +4,15 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const crypto = require("crypto");
+const { Pool } = require("pg");
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  ssl: { rejectUnauthorized: false }
+});
 const app = express();
 const PORT = process.env.PORT || 3000;
 
