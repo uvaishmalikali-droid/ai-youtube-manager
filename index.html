@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -7,7 +8,6 @@
 
 <style>
 *{box-sizing:border-box}
-
 body{
  margin:0;
  background:#10131d;
@@ -15,18 +15,14 @@ body{
  font-family:Arial,sans-serif;
  padding:18px;
 }
-
 .container{max-width:650px;margin:auto}
-
 h1{text-align:center;color:#ff4444}
-
 .card{
  background:#1d2332;
  padding:18px;
  border-radius:14px;
  margin:15px 0;
 }
-
 button{
  background:#ff3333;
  color:white;
@@ -35,11 +31,9 @@ button{
  border-radius:8px;
  font-size:16px;
  cursor:pointer;
+ margin:5px 0;
 }
-
-button:disabled{opacity:.6}
-
-input,textarea,select{
+input,textarea{
  width:100%;
  padding:12px;
  margin:10px 0;
@@ -48,18 +42,15 @@ input,textarea,select{
  border:1px solid #555;
  border-radius:8px;
 }
-
 textarea{min-height:150px}
-
 .preview{
- max-width:100%;
  width:100%;
  margin-top:10px;
  border-radius:8px;
 }
-
 .small{color:#aaa;font-size:13px}
 .status{color:#55dd88}
+.error{color:#ff7777}
 </style>
 </head>
 
@@ -73,19 +64,19 @@ Your Personal YouTube Dashboard
 </p>
 
 <div class="card">
-<h3>🔴 Connect YouTube Channel</h3>
+<h3>🔴 YouTube Channel</h3>
 
 <p id="connection">
-YouTube channel not connected
+Checking YouTube connection...
 </p>
 
 <button onclick="connect()">
 Connect YouTube
 </button>
 
-<p class="small">
-Connect your Google account to continue.
-</p>
+<button onclick="checkYouTubeStatus()">
+Refresh Connection
+</button>
 </div>
 
 <div class="card">
@@ -99,11 +90,10 @@ Generate Script
 </button>
 
 <textarea id="script"
-placeholder="Your video script will appear here">
-</textarea>
+placeholder="Your video script will appear here"></textarea>
 
 <p class="small">
-Script generation is currently a demo.
+Basic demo script generator.
 </p>
 </div>
 
@@ -139,29 +129,71 @@ Check Backend
 
 <div class="card">
 <h3>📊 Dashboard</h3>
-
 <p>Welcome to AI YouTube Manager!</p>
-
-<p class="status">
-Dashboard Loaded Successfully
-</p>
+<p class="status">Dashboard Loaded Successfully</p>
 </div>
 
 </div>
 
 <script>
-
 const API_URL =
 "https://ai-youtube-manager-iw6j.onrender.com";
 
 function connect(){
-
  document.getElementById("connection").textContent =
  "Connecting to Google...";
 
- window.location.href =
- API_URL + "/auth/google";
+ window.location.href = API_URL + "/auth/google";
+}
 
+async function checkYouTubeStatus(){
+
+ const connection =
+ document.getElementById("connection");
+
+ connection.textContent = "Checking YouTube connection...";
+
+ try{
+
+  const response = await fetch(
+   API_URL + "/api/youtube/status",
+   {
+    method:"GET",
+    credentials:"include"
+   }
+  );
+
+  if(!response.ok){
+   throw new Error("Status API error: " + response.status);
+  }
+
+  const data = await response.json();
+
+  if(data.connected){
+
+   connection.textContent =
+    "YouTube Connected Successfully! Channel: " +
+    (data.channel || data.channelName || "Connected");
+
+   connection.className = "status";
+
+  }else{
+
+   connection.textContent =
+    "YouTube channel not connected";
+
+   connection.className = "error";
+  }
+
+ }catch(error){
+
+  connection.textContent =
+   "Connection check failed. Please try again.";
+
+  connection.className = "error";
+
+  console.error(error);
+ }
 }
 
 function generateScript(){
@@ -178,29 +210,26 @@ function generateScript(){
  `Title: ${topic}
 
 Introduction:
-Hello friends! Welcome to our YouTube channel.
+नमस्कार दोस्तों! आपका स्वागत है।
 
 Main Content:
-Today we are going to talk about ${topic}.
+आज हम ${topic} के बारे में जानेंगे।
 
-First, let's understand the basics.
-Then we will discuss the important points.
-Finally, we will share some useful tips.
+इस विषय को आसान हिंदी में समझेंगे।
+महत्वपूर्ण जानकारी और सीख साझा करेंगे।
 
 Conclusion:
-Thank you for watching!
-Please Like, Share and Subscribe.
-`;
+वीडियो पसंद आए तो Like और Subscribe करें।
+धन्यवाद!`;
 
- document.getElementById("script").value=result;
-
+ document.getElementById("script").value = result;
 }
 
 document.getElementById("video").addEventListener(
  "change",
  function(){
 
-  const file=this.files[0];
+  const file = this.files[0];
 
   if(!file)return;
 
@@ -209,17 +238,16 @@ document.getElementById("video").addEventListener(
    return;
   }
 
-  const url=URL.createObjectURL(file);
+  const url = URL.createObjectURL(file);
 
-  const preview=
-  document.getElementById("videoPreview");
+  const preview =
+   document.getElementById("videoPreview");
 
-  preview.src=url;
-  preview.style.display="block";
+  preview.src = url;
+  preview.style.display = "block";
 
   document.getElementById("videoStatus").textContent =
-  "Selected: "+file.name;
-
+   "Selected: " + file.name;
  }
 );
 
@@ -228,54 +256,34 @@ async function checkBackend(){
  const status =
  document.getElementById("backendStatus");
 
- status.textContent="Checking...";
+ status.textContent = "Checking...";
 
  try{
 
-  const response=await fetch(
-   API_URL+"/api/health"
+  const response = await fetch(
+   API_URL + "/api/health"
   );
 
   if(!response.ok){
    throw new Error("Server error");
   }
 
-  const data=await response.json();
-
-  status.textContent =
-  data.message+" Status: "+data.status;
-
- }catch(error){
-
-  status.textContent =
-  "Backend connection failed. Please try again.";
-
- } 
- 
-}
-async function checkYouTubeStatus(){
-
- const connection = document.getElementById("connection");
-
- try{
-  const response = await fetch(API_URL + "/api/youtube/status");
   const data = await response.json();
 
-  if(data.connected){
-   connection.textContent =
-   "YouTube Connected Successfully! Channel: " + data.channel;
-   connection.classList.add("status");
-  }else{
-   connection.textContent = "YouTube channel not connected";
-  }
+  status.textContent =
+   (data.message || "Server running") +
+   " Status: " + (data.status || "OK");
 
  }catch(error){
-  connection.textContent = "Could not check YouTube connection.";
- checkYouTubeStatus();
+
+  status.textContent =
+   "Backend connection failed.";
+
  }
 }
-checkBackend();
 
+checkBackend();
+checkYouTubeStatus();
 </script>
 
 </body>
