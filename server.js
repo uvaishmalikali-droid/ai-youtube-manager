@@ -508,8 +508,20 @@ app.use((err, req, res, next) => {
 });
 
 // Start Server
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `AI YouTube Manager server running on port ${PORT}`
-  );app.listen(PORT, "0.0.0.0", () => {
-});
+async function startServer() {
+  try {
+    await initializeDatabase();
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(
+        `AI YouTube Manager server running on port ${PORT}`
+      );
+    });
+  } catch (error) {
+    console.error("Database startup failed:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
+
