@@ -12,7 +12,26 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
   ssl: { rejectUnauthorized: false }
-});
+});async function saveYouTubeConnection(connection) {
+  await pool.query(
+    `INSERT INTO youtube_connection
+      (id, access_token, refresh_token, expires_at, channel, channel_id)
+     VALUES (1, $1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET
+       access_token = EXCLUDED.access_token,
+       refresh_token = EXCLUDED.refresh_token,
+       expires_at = EXCLUDED.expires_at,
+       channel = EXCLUDED.channel,
+       channel_id = EXCLUDED.channel_id`,
+    [
+      connection.accessToken,
+      connection.refreshToken,
+      connection.expiresAt,
+      connection.channel,
+      connection.channelId
+    ]
+  );
+}
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -293,7 +312,7 @@ app.get("/auth/google/callback", async (req, res) => {
       channel:
         channelData.items[0].snippet?.title || "YouTube Channel",
       channelId: channelData.items[0].id
-    };
+    };    await saveYouTubeConnection(youtubeConnection);
 
     const safeChannel = String(youtubeConnection.channel)
       .replace(/&/g, "&amp;")
