@@ -173,6 +173,7 @@ async function refreshYouTubeAccessToken() {
   if (data.refresh_token) {
     youtubeConnection.refreshToken = data.refresh_token;
   }
+    await saveYouTubeConnection(youtubeConnection);
 
   return youtubeConnection.accessToken;
 }
