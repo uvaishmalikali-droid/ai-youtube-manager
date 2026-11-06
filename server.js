@@ -13,7 +13,20 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
   ssl: { rejectUnauthorized: false }
 });async function saveYouTubeConnection(connection) {
-  await pool.query(
+  await pool.query(async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS youtube_connection (
+      id INTEGER PRIMARY KEY,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT,
+      expires_at BIGINT NOT NULL,
+      channel TEXT,
+      channel_id TEXT
+    )
+  `);
+
+  console.log("Database table is ready.");
+}
     `INSERT INTO youtube_connection
       (id, access_token, refresh_token, expires_at, channel, channel_id)
      VALUES (1, $1, $2, $3, $4, $5)
