@@ -133,7 +133,12 @@ async function initializeDatabase() {
       channel_id TEXT
     )
   `);
-
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS oauth_states (
+    state TEXT PRIMARY KEY,
+    expires_at BIGINT NOT NULL
+  )
+`);
   console.log("Database table is ready.");
 }
 
