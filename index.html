@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -6,9 +7,7 @@
 <title>AI YouTube Manager</title>
 
 <style>
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -18,15 +17,9 @@ body {
   padding: 18px;
 }
 
-.container {
-  max-width: 650px;
-  margin: auto;
-}
+.container { max-width: 650px; margin: auto; }
 
-h1 {
-  text-align: center;
-  color: #ff4444;
-}
+h1 { text-align: center; color: #ff4444; }
 
 .card {
   background: #1d2332;
@@ -46,11 +39,9 @@ button {
   margin: 5px 0;
 }
 
-button:hover {
-  background: #cc2222;
-}
+button:disabled { opacity: 0.5; }
 
-input, textarea {
+input, textarea, select {
   width: 100%;
   padding: 12px;
   margin: 10px 0;
@@ -60,9 +51,7 @@ input, textarea {
   border-radius: 8px;
 }
 
-textarea {
-  min-height: 150px;
-}
+textarea { min-height: 150px; }
 
 .preview {
   width: 100%;
@@ -70,23 +59,24 @@ textarea {
   border-radius: 8px;
 }
 
-.small {
-  color: #aaa;
-  font-size: 13px;
+.small { color: #aaa; font-size: 13px; }
+.status { color: #55dd88; }
+.error { color: #ff7777; }
+
+.voice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.status {
+#voiceStatus {
   color: #55dd88;
-}
-
-.error {
-  color: #ff7777;
+  font-size: 14px;
 }
 </style>
 </head>
 
 <body>
-
 <div class="container">
 
 <h1>▶ AI YouTube Manager</h1>
@@ -95,337 +85,316 @@ textarea {
 Your Personal YouTube Dashboard
 </p>
 
-<!-- YouTube Connection -->
-
 <div class="card">
-
 <h3>🔴 YouTube Channel</h3>
-
-<p id="connection">
-Checking YouTube connection...
-</p>
-
-<button onclick="connect()">
-Connect YouTube
-</button>
-
-<button onclick="checkYouTubeStatus()">
-Refresh Connection
-</button>
-
+<p id="connection">Checking YouTube connection...</p>
+<button onclick="connect()">Connect YouTube</button>
+<button onclick="checkYouTubeStatus()">Refresh Connection</button>
 </div>
 
-<!-- AI Script Generator -->
-
 <div class="card">
-
 <h3>🤖 AI Video Script</h3>
 
-<input
-id="topic"
-placeholder="Enter your video topic"
->
+<input id="topic" placeholder="Enter your video topic">
 
-<button onclick="generateScript()">
-Generate Script
-</button>
+<button onclick="generateScript()">Generate Script</button>
 
-<textarea
-id="script"
-placeholder="Your video script will appear here"
-></textarea>
+<textarea id="script" placeholder="Your video script will appear here"></textarea>
+
+<p class="small">AI Video Script Generator</p>
+</div>
+
+<!-- HINDI VOICEOVER PLAYER -->
+<div class="card">
+<h3>🎙️ Hindi AI Voiceover</h3>
 
 <p class="small">
-AI Video Script Generator
+अपनी Script को फोन में उपलब्ध हिंदी आवाज़ से सुनें।
 </p>
 
+<label for="voiceSelect">Voice Select करें:</label>
+<select id="voiceSelect">
+  <option value="">Hindi voice loading...</option>
+</select>
+
+<label for="voiceRate">Voice Speed:</label>
+<select id="voiceRate">
+  <option value="0.85">Slow</option>
+  <option value="0.95" selected>Normal</option>
+  <option value="1">Natural</option>
+  <option value="1.1">Fast</option>
+</select>
+
+<div class="voice-buttons">
+  <button onclick="playVoice()">▶ Play Voice</button>
+  <button onclick="pauseVoice()">⏸ Pause</button>
+  <button onclick="resumeVoice()">▶ Resume</button>
+  <button onclick="stopVoice()">⏹ Stop</button>
 </div>
 
-<!-- Video Upload -->
+<p id="voiceStatus">Voiceover तैयार है।</p>
+
+<p class="small">
+ध्यान दें: उपलब्ध आवाज़ आपके फोन और Browser पर निर्भर करेगी।
+</p>
+</div>
 
 <div class="card">
-
 <h3>🎬 Select Video</h3>
 
-<input
-type="file"
-id="video"
-accept="video/*"
->
+<input type="file" id="video" accept="video/*">
 
-<video
-id="videoPreview"
-class="preview"
-controls
-style="display:none"
-></video>
+<video id="videoPreview" class="preview" controls style="display:none"></video>
 
-<p id="videoStatus" class="small">
-No video selected
-</p>
-
+<p id="videoStatus" class="small">No video selected</p>
 </div>
 
-<!-- Backend Status -->
-
 <div class="card">
-
 <h3>📡 Backend Status</h3>
-
-<p id="backendStatus">
-Checking server...
-</p>
-
-<button onclick="checkBackend()">
-Check Backend
-</button>
-
+<p id="backendStatus">Checking server...</p>
+<button onclick="checkBackend()">Check Backend</button>
 </div>
 
-<!-- Dashboard -->
-
 <div class="card">
-
 <h3>📊 Dashboard</h3>
-
 <p>Welcome to AI YouTube Manager!</p>
-
-<p class="status">
-Dashboard Loaded Successfully
-</p>
-
+<p class="status">Dashboard Loaded Successfully</p>
 </div>
 
 </div>
 
 <script>
-
-// BACKEND URL
-
-const API_URL =
-"https://ai-youtube-manager-iw6j.onrender.com";
-
-
-// CONNECT YOUTUBE
+const API_URL = "https://ai-youtube-manager-iw6j.onrender.com";
 
 function connect() {
-
   document.getElementById("connection").textContent =
-  "Connecting to Google...";
-
+    "Connecting to Google...";
   window.location.href = API_URL + "/auth/google";
-
 }
 
-
-// CHECK YOUTUBE CONNECTION
-
 async function checkYouTubeStatus() {
-
-  const connection =
-  document.getElementById("connection");
-
-  connection.textContent =
-  "Checking YouTube connection...";
+  const connection = document.getElementById("connection");
+  connection.textContent = "Checking YouTube connection...";
 
   try {
-
-    const response = await fetch(
-      API_URL + "/api/youtube/status",
-      {
-        method: "GET"
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        "Status API error: " + response.status
-      );
-    }
+    const response = await fetch(API_URL + "/api/youtube/status");
+    if (!response.ok) throw new Error("Status API error");
 
     const data = await response.json();
 
     if (data.connected) {
-
       connection.textContent =
-      "YouTube Connected Successfully! Channel: " +
-      (data.channel || data.channelName || "Connected");
-
+        "YouTube Connected Successfully! Channel: " +
+        (data.channel || "Connected");
       connection.className = "status";
-
     } else {
-
-      connection.textContent =
-      "YouTube channel not connected";
-
+      connection.textContent = "YouTube channel not connected";
       connection.className = "error";
-
     }
-
   } catch (error) {
-
-    connection.textContent =
-    "Connection check failed. Please try again.";
-
+    connection.textContent = "Connection check failed.";
     connection.className = "error";
-
-    console.error("YouTube Status Error:", error);
-
   }
-
 }
 
-
-// AI SCRIPT GENERATOR
-
 async function generateScript() {
-
-  const topic =
-  document.getElementById("topic").value.trim();
-
-  const result =
-  document.getElementById("script");
+  const topic = document.getElementById("topic").value.trim();
+  const result = document.getElementById("script");
 
   if (!topic) {
-
     alert("Please enter your video topic.");
-
     return;
-
   }
 
-  result.value =
-  "AI is generating your script...";
+  stopVoice();
+  result.value = "AI is generating your script...";
 
   try {
-
-    const response = await fetch(
-      API_URL + "/api/generate-script",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json"
-        },
-
-        body: JSON.stringify({
-          topic: topic,
-          language: "Hindi",
-          style: "Engaging"
-        })
-      }
-    );
+    const response = await fetch(API_URL + "/api/generate-script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: topic,
+        language: "Hindi",
+        style: "Engaging"
+      })
+    });
 
     const data = await response.json();
 
     if (!response.ok || !data.success) {
-
-      throw new Error(
-        data.message || "AI generation failed."
-      );
-
+      throw new Error(data.message || "AI generation failed.");
     }
 
     result.value = data.script || "No script received.";
-
   } catch (error) {
-
-    result.value =
-    "Error: " + error.message;
-
-    console.error("AI Script Error:", error);
-
+    result.value = "Error: " + error.message;
   }
-
 }
 
+// VOICEOVER
+let availableVoices = [];
+let activeUtterance = null;
 
-// VIDEO PREVIEW
+function loadVoices() {
+  const select = document.getElementById("voiceSelect");
+  if (!("speechSynthesis" in window)) {
+    select.innerHTML = '<option>Voice not supported</option>';
+    document.getElementById("voiceStatus").textContent =
+      "इस Browser में voice सुविधा उपलब्ध नहीं है।";
+    return;
+  }
 
-document.getElementById("video").addEventListener(
-  "change",
-  function() {
+  availableVoices = window.speechSynthesis.getVoices();
 
-    const file = this.files[0];
+  const hindiVoices = availableVoices.filter(voice =>
+    voice.lang.toLowerCase().startsWith("hi")
+  );
 
-    if (!file) return;
+  select.innerHTML = "";
 
-    if (!file.type.startsWith("video/")) {
+  if (hindiVoices.length === 0) {
+    select.innerHTML = '<option value="">Hindi voice नहीं मिली</option>';
+    document.getElementById("voiceStatus").textContent =
+      "फोन में Hindi Text-to-Speech voice उपलब्ध नहीं है।";
+    return;
+  }
 
-      alert("Please select a video file.");
+  hindiVoices.forEach((voice, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = voice.name + " (" + voice.lang + ")";
+    select.appendChild(option);
+  });
 
-      this.value = "";
+  document.getElementById("voiceStatus").textContent =
+    "Hindi voice उपलब्ध है।";
+}
 
+function playVoice() {
+  const text = document.getElementById("script").value.trim();
+  const status = document.getElementById("voiceStatus");
+
+  if (!text || text === "AI is generating your script...") {
+    alert("पहले Script Generate करें या Script लिखें।");
+    return;
+  }
+
+  if (!("speechSynthesis" in window)) {
+    status.textContent = "आपका Browser voice support नहीं करता।";
+    return;
+  }
+
+  stopVoice();
+
+  const chunks = text.match(/[\s\S]{1,180}([।.!?\n]|$)/g) || [text];
+  const voiceIndex = Number(document.getElementById("voiceSelect").value);
+  const selectedVoice = availableVoices.filter(v =>
+    v.lang.toLowerCase().startsWith("hi")
+  )[voiceIndex];
+
+  let index = 0;
+
+  function speakNext() {
+    if (index >= chunks.length) {
+      status.textContent = "Voiceover पूरा हो गया।";
+      activeUtterance = null;
       return;
-
     }
 
-    const url = URL.createObjectURL(file);
+    const utterance = new SpeechSynthesisUtterance(chunks[index].trim());
+    utterance.lang = "hi-IN";
+    utterance.rate = Number(document.getElementById("voiceRate").value);
+    utterance.pitch = 0.75;
 
-    const preview =
-    document.getElementById("videoPreview");
+    if (selectedVoice) utterance.voice = selectedVoice;
 
-    preview.src = url;
+    utterance.onend = () => {
+      index++;
+      speakNext();
+    };
 
-    preview.style.display = "block";
+    utterance.onerror = (event) => {
+      status.textContent = "Voice error: " + event.error;
+      activeUtterance = null;
+    };
 
-    document.getElementById("videoStatus").textContent =
-    "Selected: " + file.name;
-
+    activeUtterance = utterance;
+    window.speechSynthesis.speak(utterance);
+    status.textContent = "Voiceover चल रहा है...";
   }
-);
 
+  speakNext();
+}
 
-// CHECK BACKEND
+function pauseVoice() {
+  if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.pause();
+    document.getElementById("voiceStatus").textContent = "Voice paused.";
+  }
+}
+
+function resumeVoice() {
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
+    document.getElementById("voiceStatus").textContent = "Voice resumed.";
+  }
+}
+
+function stopVoice() {
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  activeUtterance = null;
+  const status = document.getElementById("voiceStatus");
+  if (status) status.textContent = "Voice stopped.";
+}
+
+if ("speechSynthesis" in window) {
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+document.getElementById("video").addEventListener("change", function() {
+  const file = this.files[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("video/")) {
+    alert("Please select a video file.");
+    this.value = "";
+    return;
+  }
+
+  const url = URL.createObjectURL(file);
+  const preview = document.getElementById("videoPreview");
+  preview.src = url;
+  preview.style.display = "block";
+
+  document.getElementById("videoStatus").textContent =
+    "Selected: " + file.name;
+});
 
 async function checkBackend() {
-
-  const status =
-  document.getElementById("backendStatus");
-
+  const status = document.getElementById("backendStatus");
   status.textContent = "Checking...";
 
   try {
-
-    const response = await fetch(
-      API_URL + "/api/health"
-    );
-
-    if (!response.ok) {
-
-      throw new Error("Server error: " + response.status);
-
-    }
+    const response = await fetch(API_URL + "/api/health");
+    if (!response.ok) throw new Error("Server error");
 
     const data = await response.json();
-
     status.textContent =
-    (data.message || "Server running") +
-    " Status: " + (data.status || "OK");
-
+      (data.message || "Server running") +
+      " Status: " + (data.status || "OK");
     status.className = "status";
-
   } catch (error) {
-
-    status.textContent =
-    "Backend connection failed.";
-
+    status.textContent = "Backend connection failed.";
     status.className = "error";
-
-    console.error("Backend Error:", error);
-
   }
-
 }
 
-
-// INITIAL CHECKS
-
 checkBackend();
-
 checkYouTubeStatus();
-
 </script>
-
 </body>
 </html>
