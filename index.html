@@ -191,38 +191,54 @@ async function checkYouTubeStatus(){
 
   connection.className = "error";
 
-  console.error(error);
- }
-}
-
-function generateScript(){
+async function generateScript(){
 
  const topic =
  document.getElementById("topic").value.trim();
+
+ const result =
+ document.getElementById("script");
 
  if(!topic){
   alert("Please enter your video topic.");
   return;
  }
 
- const result =
- `Title: ${topic}
+ result.value = "AI is generating your script...";
 
-Introduction:
-नमस्कार दोस्तों! आपका स्वागत है।
+ try{
 
-Main Content:
-आज हम ${topic} के बारे में जानेंगे।
+  const response = await fetch(
+   API_URL + "/api/generate-script",
+   {
+    method: "POST",
+    headers: {
+     "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+     topic: topic,
+     language: "Hindi",
+     style: "Engaging"
+    })
+   }
+  );
 
-इस विषय को आसान हिंदी में समझेंगे।
-महत्वपूर्ण जानकारी और सीख साझा करेंगे।
+  const data = await response.json();
 
-Conclusion:
-वीडियो पसंद आए तो Like और Subscribe करें।
-धन्यवाद!`;
+  if(!response.ok || !data.success){
+   throw new Error(data.message || "AI generation failed.");
+  }
 
- document.getElementById("script").value = result;
+  result.value = data.script;
+
+ }catch(error){
+
+  result.value = "Error: " + error.message;
+  console.error("AI Script Error:", error);
+
+ }
 }
+
 
 document.getElementById("video").addEventListener(
  "change",
