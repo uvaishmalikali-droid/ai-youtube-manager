@@ -805,6 +805,107 @@ Do not add unnecessary explanations.
 // UNKNOWN API ROUTE
 // =====================================
 
+// =====================================
+// HINDI AI MALE VOICEOVER - MP3
+// =====================================
+
+app.post("/api/generate-voiceover", async (req, res) => {
+  try {
+    const apiKey = process.env.GOOGLE_TTS_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        message: "Google TTS API key is missing."
+      });
+    }
+
+    const { text: scriptText } = req.body || {};
+
+    if (
+      typeof scriptText !== "string" ||
+      !scriptText.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a script for voiceover."
+      });
+    }
+
+    if (scriptText.length > 4500) {
+      return res.status(400).json({
+        success: false,
+        message: "Script is too long. Please use up to 4500 characters."
+      });
+    }
+
+    const response = await fetch(
+      "https://texttospeech.googleapis.com/v1/text:synthesize?key=" +
+      encodeURIComponent(apiKey),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          input: {
+            text: scriptText.trim()
+          },
+          voice: {
+            languageCode: "hi-IN",
+            name: "hi-IN-Neural2-C",
+            ssmlGender: "MALE"
+          },
+          audioConfig: {
+            audioEncoding: "MP3",
+            speakingRate: 0.92,
+            pitch: -2.5
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.audioContent) {
+      console.error(
+        "Google TTS error:",
+        data.error?.message || "Unknown error"
+      );
+
+      return res.status(502).json({
+        success: false,
+        message: "Voiceover generation failed. Check Render logs."
+      });
+    }
+
+    const audioBuffer = Buffer.from(
+      data.audioContent,
+      "base64"
+    );
+
+    res.set({
+      "Content-Type": "audio/mpeg",
+      "Content-Disposition": 'attachment; filename="Hindi-Voiceover.mp3"',
+      "Content-Length": audioBuffer.length,
+      "Cache-Control": "no-store"
+    });
+
+    return res.send(audioBuffer);
+
+  } catch (error) {
+    console.error(
+      "Voiceover error:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error while generating voiceover."
+    });
+  }
+});
+
 app.use("/api", (req, res) => {
   res.status(404).json({
     success: false,
