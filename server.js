@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 
 const express = require("express");
@@ -6,14 +7,122 @@ const helmet = require("helmet");
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  "https://uvaishmalikali-droid.github.io";
+
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
+const SESSION_SECRET = process.env.SESSION_SECRET;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
   ssl: { rejectUnauthorized: false }
-});async function saveYouTubeConnection(connection) {
-  await pool.query(async function initializeDatabase() {
+});
+
+const allowedOrigins = [
+  FRONTEND_URL,
+  "http://localhost:3000"
+];
+
+app.set("trust proxy", 1);
+app.use(helmet());
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Origin not allowed"));
+  }
+}));
+
+app.use(express.json({ limit: "1mb" }));
+
+// YouTube connection
+let youtubeConnection = null;
+
+
+// =====================================
+// TOKEN ENCRYPTION
+// =====================================
+
+function getEncryptionKey() {
+  if (!SESSION_SECRET) {
+    throw new Error("SESSION_SECRET is missing.");
+  }
+
+  return crypto.scryptSync(
+    SESSION_SECRET,
+    "ai-youtube-manager-token-storage-v1",
+    32
+  );
+}
+
+function encryptToken(value) {
+  if (!value) return null;
+
+  const iv = crypto.randomBytes(12);
+
+  const cipher = crypto.createCipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    iv
+  );
+
+  const encrypted = Buffer.concat([
+    cipher.update(String(value), "utf8"),
+    cipher.final()
+  ]);
+
+  const tag = cipher.getAuthTag();
+
+  return [
+    iv.toString("hex"),
+    tag.toString("hex"),
+    encrypted.toString("hex")
+  ].join(".");
+}
+
+function decryptToken(value) {
+  if (!value) return null;
+
+  const parts = value.split(".");
+
+  if (parts.length !== 3) {
+    throw new Error("Stored token format is invalid.");
+  }
+
+  const [ivHex, tagHex, encryptedHex] = parts;
+
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    getEncryptionKey(),
+    Buffer.from(ivHex, "hex")
+  );
+
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(encryptedHex, "hex")),
+    decipher.final()
+  ]);
+
+  return decrypted.toString("utf8");
+}
+
+
+// =====================================
+// DATABASE
+// =====================================
+
+async function initializeDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS youtube_connection (
       id INTEGER PRIMARY KEY,
@@ -27,6 +136,9 @@ const pool = new Pool({
 
   console.log("Database table is ready.");
 }
+
+async function saveYouTubeConnection(connection) {
+  await pool.query(
     `INSERT INTO youtube_connection
       (id, access_token, refresh_token, expires_at, channel, channel_id)
      VALUES (1, $1, $2, $3, $4, $5)
@@ -37,48 +149,58 @@ const pool = new Pool({
        channel = EXCLUDED.channel,
        channel_id = EXCLUDED.channel_id`,
     [
-      connection.accessToken,
-      connection.refreshToken,
+      encryptToken(connection.accessToken),
+      encryptToken(connection.refreshToken),
       connection.expiresAt,
       connection.channel,
       connection.channelId
     ]
   );
 }
-const app = express();
-const PORT = process.env.PORT || 3000;
 
-const FRONTEND_URL =
-  process.env.FRONTEND_URL ||
-  "https://uvaishmalikali-droid.github.io";
+async function loadYouTubeConnection() {
+  const result = await pool.query(
+    `SELECT * FROM youtube_connection WHERE id = 1`
+  );
 
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
-const SESSION_SECRET = process.env.SESSION_SECRET;
-
-const allowedOrigins = [FRONTEND_URL, "http://localhost:3000"];
-
-app.set("trust proxy", 1);
-app.use(helmet());
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error("Origin not allowed"));
+  if (result.rows.length === 0) {
+    youtubeConnection = null;
+    console.log("No saved YouTube connection.");
+    return;
   }
-}));
 
-app.use(express.json({ limit: "1mb" }));
+  const row = result.rows[0];
 
-// YouTube connection (temporary in-memory storage)
-let youtubeConnection = null;
+  youtubeConnection = {
+    accessToken: decryptToken(row.access_token),
+    refreshToken: decryptToken(row.refresh_token),
+    expiresAt: Number(row.expires_at),
+    channel: row.channel,
+    channelId: row.channel_id
+  };
+
+  console.log("Saved YouTube connection loaded.");
+}
+
+async function deleteYouTubeConnection() {
+  await pool.query(
+    `DELETE FROM youtube_connection WHERE id = 1`
+  );
+
+  youtubeConnection = null;
+}
+
+
+// =====================================
+// COOKIE AND OAUTH HELPERS
+// =====================================
 
 function readCookies(header = "") {
   const cookies = {};
 
   header.split(";").filter(Boolean).forEach((item) => {
     const separator = item.indexOf("=");
+
     if (separator === -1) return;
 
     const name = item.slice(0, separator).trim();
@@ -102,19 +224,27 @@ function createOAuthState(nonce) {
 }
 
 function isValidOAuthState(state, cookieState) {
-  if (typeof state !== "string" || typeof cookieState !== "string") {
+  if (
+    typeof state !== "string" ||
+    typeof cookieState !== "string"
+  ) {
     return false;
   }
 
   if (state !== cookieState) return false;
 
   const parts = state.split(".");
+
   if (parts.length !== 2) return false;
 
   const [nonce, suppliedSignature] = parts;
   const expectedSignature = createOAuthState(nonce);
 
-  if (suppliedSignature.length !== expectedSignature.length) return false;
+  if (
+    suppliedSignature.length !== expectedSignature.length
+  ) {
+    return false;
+  }
 
   return crypto.timingSafeEqual(
     Buffer.from(suppliedSignature),
@@ -131,76 +261,135 @@ function oauthIsConfigured() {
   );
 }
 
+
+// =====================================
+// YOUTUBE TOKEN REFRESH
+// =====================================
+
 async function refreshYouTubeAccessToken() {
   if (!youtubeConnection) {
     throw new Error("YouTube account is not connected.");
   }
 
-  if (youtubeConnection.expiresAt > Date.now() + 60000) {
+  if (
+    youtubeConnection.expiresAt >
+    Date.now() + 60000
+  ) {
     return youtubeConnection.accessToken;
   }
 
   if (!youtubeConnection.refreshToken) {
-    youtubeConnection = null;
-    throw new Error("Google refresh token is missing. Please connect YouTube again.");
+    await deleteYouTubeConnection();
+
+    throw new Error(
+      "Google refresh token is missing. Please connect YouTube again."
+    );
   }
 
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      refresh_token: youtubeConnection.refreshToken,
-      grant_type: "refresh_token"
-    })
-  });
+  const response = await fetch(
+    "https://oauth2.googleapis.com/token",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        refresh_token: youtubeConnection.refreshToken,
+        grant_type: "refresh_token"
+      })
+    }
+  );
 
   const data = await response.json();
 
   if (!response.ok || !data.access_token) {
-    console.error("Google token refresh failed:", data.error || "Unknown error");
-    youtubeConnection = null;
-    throw new Error("Could not refresh Google access. Please connect YouTube again.");
+    console.error(
+      "Google token refresh failed:",
+      data.error || "Unknown error"
+    );
+
+    if (data.error === "invalid_grant") {
+      await deleteYouTubeConnection();
+    }
+
+    throw new Error(
+      "Could not refresh Google access. Please connect YouTube again."
+    );
   }
 
   youtubeConnection.accessToken = data.access_token;
+
   youtubeConnection.expiresAt =
-    Date.now() + (Number(data.expires_in || 3600) * 1000);
+    Date.now() +
+    (Number(data.expires_in || 3600) * 1000);
 
   if (data.refresh_token) {
     youtubeConnection.refreshToken = data.refresh_token;
   }
-    await saveYouTubeConnection(youtubeConnection);
+
+  await saveYouTubeConnection(youtubeConnection);
 
   return youtubeConnection.accessToken;
 }
 
-// Home Page
+
+// =====================================
+// HOME PAGE
+// =====================================
+
 app.get("/", (req, res) => {
-  res.type("text").send("AI YouTube Manager backend is running.");
+  res.type("text").send(
+    "AI YouTube Manager backend is running."
+  );
 });
 
-// Backend Health Check
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "AI YouTube Manager Backend is running!",
-    status: "OK"
-  });
+
+// =====================================
+// HEALTH CHECK
+// =====================================
+
+app.get("/api/health", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+
+    res.json({
+      success: true,
+      message: "AI YouTube Manager Backend is running!",
+      database: "connected",
+      status: "OK"
+    });
+
+  } catch (error) {
+    console.error("Health check error:", error.message);
+
+    res.status(503).json({
+      success: false,
+      message: "Database connection failed."
+    });
+  }
 });
 
-// Start Google OAuth
+
+// =====================================
+// START GOOGLE OAUTH
+// =====================================
+
 app.get("/auth/google", (req, res) => {
   if (!oauthIsConfigured()) {
-    return res.status(500).send("Google OAuth configuration is missing.");
+    return res.status(500).send(
+      "Google OAuth configuration is missing."
+    );
   }
 
   const nonce = crypto.randomBytes(32).toString("hex");
-  const state = `${nonce}.${createOAuthState(nonce)}`;
-  const secureCookie = REDIRECT_URI.startsWith("https://");
+
+  const state =
+    `${nonce}.${createOAuthState(nonce)}`;
+
+  const secureCookie =
+    REDIRECT_URI.startsWith("https://");
 
   res.cookie("oauth_state", state, {
     httpOnly: true,
@@ -214,21 +403,29 @@ app.get("/auth/google", (req, res) => {
     client_id: process.env.GOOGLE_CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload",
+    scope:
+      "https://www.googleapis.com/auth/youtube.readonly " +
+      "https://www.googleapis.com/auth/youtube.upload",
     access_type: "offline",
     prompt: "consent",
     state
   });
 
   res.redirect(
-    "https://accounts.google.com/o/oauth2/v2/auth?" + params.toString()
+    "https://accounts.google.com/o/oauth2/v2/auth?" +
+    params.toString()
   );
 });
 
-// Google OAuth Callback
+
+// =====================================
+// GOOGLE OAUTH CALLBACK
+// =====================================
+
 app.get("/auth/google/callback", async (req, res) => {
   const secureCookie = Boolean(
-    REDIRECT_URI && REDIRECT_URI.startsWith("https://")
+    REDIRECT_URI &&
+    REDIRECT_URI.startsWith("https://")
   );
 
   const cookies = readCookies(req.headers.cookie);
@@ -242,7 +439,9 @@ app.get("/auth/google/callback", async (req, res) => {
   });
 
   if (!oauthIsConfigured()) {
-    return res.status(500).send("Google OAuth configuration is missing.");
+    return res.status(500).send(
+      "Google OAuth configuration is missing."
+    );
   }
 
   if (!isValidOAuthState(state, cookies.oauth_state)) {
@@ -257,8 +456,13 @@ app.get("/auth/google/callback", async (req, res) => {
     );
   }
 
-  if (typeof req.query.code !== "string" || !req.query.code) {
-    return res.status(400).send("Google authorization code is missing.");
+  if (
+    typeof req.query.code !== "string" ||
+    !req.query.code
+  ) {
+    return res.status(400).send(
+      "Google authorization code is missing."
+    );
   }
 
   try {
@@ -286,6 +490,7 @@ app.get("/auth/google/callback", async (req, res) => {
         "Google token exchange failed:",
         tokens.error || "Unknown error"
       );
+
       return res.status(502).send(
         "Google token exchange failed. Please try again."
       );
@@ -307,12 +512,16 @@ app.get("/auth/google/callback", async (req, res) => {
         "YouTube API error:",
         channelData.error?.message || "Unknown error"
       );
+
       return res.status(502).send(
         "Could not retrieve YouTube channel. Check YouTube API access."
       );
     }
 
-    if (!channelData.items || channelData.items.length === 0) {
+    if (
+      !channelData.items ||
+      channelData.items.length === 0
+    ) {
       return res.status(404).send(
         "No YouTube channel was found for this Google account."
       );
@@ -320,13 +529,20 @@ app.get("/auth/google/callback", async (req, res) => {
 
     youtubeConnection = {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || null,
+      refreshToken:
+        tokens.refresh_token ||
+        youtubeConnection?.refreshToken ||
+        null,
       expiresAt:
-        Date.now() + (Number(tokens.expires_in || 3600) * 1000),
+        Date.now() +
+        (Number(tokens.expires_in || 3600) * 1000),
       channel:
-        channelData.items[0].snippet?.title || "YouTube Channel",
+        channelData.items[0].snippet?.title ||
+        "YouTube Channel",
       channelId: channelData.items[0].id
-    };    await saveYouTubeConnection(youtubeConnection);
+    };
+
+    await saveYouTubeConnection(youtubeConnection);
 
     const safeChannel = String(youtubeConnection.channel)
       .replace(/&/g, "&amp;")
@@ -351,11 +567,18 @@ app.get("/auth/google/callback", async (req, res) => {
 
   } catch (error) {
     console.error("OAuth error:", error.message);
-    res.status(500).send("Google OAuth connection failed.");
+
+    res.status(500).send(
+      "Google OAuth connection failed."
+    );
   }
 });
 
-// YouTube Connection Status
+
+// =====================================
+// YOUTUBE CONNECTION STATUS
+// =====================================
+
 app.get("/api/youtube/status", async (req, res) => {
   if (!youtubeConnection) {
     return res.json({
@@ -384,33 +607,61 @@ app.get("/api/youtube/status", async (req, res) => {
   }
 });
 
-// Disconnect YouTube Account
+
+// =====================================
+// DISCONNECT YOUTUBE ACCOUNT
+// =====================================
+
 app.post("/api/youtube/disconnect", async (req, res) => {
   if (youtubeConnection?.accessToken) {
     try {
-      await fetch("https://oauth2.googleapis.com/revoke", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: new URLSearchParams({
-          token: youtubeConnection.accessToken
-        })
-      });
+      await fetch(
+        "https://oauth2.googleapis.com/revoke",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: new URLSearchParams({
+            token: youtubeConnection.accessToken
+          })
+        }
+      );
+
     } catch (error) {
-      console.error("Google token revoke error:", error.message);
+      console.error(
+        "Google token revoke error:",
+        error.message
+      );
     }
   }
 
-  youtubeConnection = null;
+  try {
+    await deleteYouTubeConnection();
 
-  res.json({
-    success: true,
-    connected: false
-  });
+    res.json({
+      success: true,
+      connected: false
+    });
+
+  } catch (error) {
+    console.error(
+      "Disconnect database error:",
+      error.message
+    );
+
+    res.status(500).json({
+      success: false,
+      message: "Could not remove YouTube connection."
+    });
+  }
 });
 
-// AI Script Generation
+
+// =====================================
+// AI SCRIPT GENERATION
+// =====================================
+
 app.post("/api/generate-script", async (req, res) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -420,9 +671,17 @@ app.post("/api/generate-script", async (req, res) => {
       });
     }
 
-    const { topic, language, style } = req.body;
+    const {
+      topic,
+      language,
+      style
+    } = req.body || {};
 
-    if (!topic || typeof topic !== "string" || !topic.trim()) {
+    if (
+      !topic ||
+      typeof topic !== "string" ||
+      !topic.trim()
+    ) {
       return res.status(400).json({
         success: false,
         message: "Please enter a video topic"
@@ -451,7 +710,8 @@ Write clearly and naturally.
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+          "Authorization":
+            `Bearer ${process.env.OPENAI_API_KEY}`
         },
         body: JSON.stringify({
           model: "gpt-4.1-mini",
@@ -477,11 +737,15 @@ Write clearly and naturally.
 
     res.json({
       success: true,
-      script: data.output_text || "No script was generated."
+      script:
+        data.output_text || "No script was generated."
     });
 
   } catch (error) {
-    console.error("Script error:", error.message);
+    console.error(
+      "Script error:",
+      error.message
+    );
 
     res.status(500).json({
       success: false,
@@ -490,7 +754,11 @@ Write clearly and naturally.
   }
 });
 
-// Unknown API Route
+
+// =====================================
+// UNKNOWN API ROUTE
+// =====================================
+
 app.use("/api", (req, res) => {
   res.status(404).json({
     success: false,
@@ -498,7 +766,11 @@ app.use("/api", (req, res) => {
   });
 });
 
-// Error Handler
+
+// =====================================
+// ERROR HANDLER
+// =====================================
+
 app.use((err, req, res, next) => {
   console.error("Server error:", err.message);
 
@@ -508,21 +780,31 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
+
+// =====================================
+// START SERVER
+// =====================================
+
 async function startServer() {
   try {
     await initializeDatabase();
+
+    await loadYouTubeConnection();
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `AI YouTube Manager server running on port ${PORT}`
       );
     });
+
   } catch (error) {
-    console.error("Database startup failed:", error);
+    console.error(
+      "Database startup failed:",
+      error.message
+    );
+
     process.exit(1);
   }
 }
 
 startServer();
-
