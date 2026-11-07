@@ -133,12 +133,14 @@ async function initializeDatabase() {
       channel_id TEXT
     )
   `);
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS oauth_states (
-    state TEXT PRIMARY KEY,
-    expires_at BIGINT NOT NULL
-  )
-`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      state TEXT PRIMARY KEY,
+      expires_at BIGINT NOT NULL
+    )
+  `);
+
   console.log("Database table is ready.");
 }
 
@@ -664,15 +666,17 @@ app.post("/api/youtube/disconnect", async (req, res) => {
 
 
 // =====================================
-// AI SCRIPT GENERATION
+// GEMINI AI SCRIPT GENERATION
 // =====================================
 
 app.post("/api/generate-script", async (req, res) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
       return res.status(500).json({
         success: false,
-        message: "OpenAI API key is missing"
+        message: "Gemini API key is missing in Render Environment."
       });
     }
 
@@ -683,45 +687,63 @@ app.post("/api/generate-script", async (req, res) => {
     } = req.body || {};
 
     if (
-      !topic ||
       typeof topic !== "string" ||
       !topic.trim()
     ) {
       return res.status(400).json({
         success: false,
-        message: "Please enter a video topic"
+        message: "Please enter a video topic."
       });
     }
 
-    const prompt = `
-Create a YouTube video script.
+    const safeTopic = topic.trim().slice(0, 500);
+    const safeLanguage = String(language || "Hindi").slice(0, 50);
+    const safeStyle = String(style || "Engaging").slice(0, 50);
 
-Topic: ${topic.slice(0, 500)}
-Language: ${String(language || "Hindi").slice(0, 50)}
-Style: ${String(style || "Engaging").slice(0, 50)}
+    const prompt = `
+You are a professional YouTube video script writer.
+
+Create an original and engaging YouTube video script.
+
+Topic: ${safeTopic}
+Language: ${safeLanguage}
+Style: ${safeStyle}
 
 Include:
-1. Catchy title
-2. Strong opening hook
-3. Complete video script
-4. Ending and call to action
+1. Catchy YouTube title.
+2. Strong opening hook.
+3. Complete video script.
+4. Scene-by-scene ideas where useful.
+5. Ending and call to action.
 
 Write clearly and naturally.
+Use the requested language.
+Do not add unnecessary explanations.
 `;
 
     const response = await fetch(
-      "https://api.openai.com/v1/responses",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization":
-            `Bearer ${process.env.OPENAI_API_KEY}`
+          "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          input: prompt,
-          max_output_tokens: 1500
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: prompt
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 1500
+          }
         })
       }
     );
@@ -730,31 +752,50 @@ Write clearly and naturally.
 
     if (!response.ok) {
       console.error(
-        "OpenAI API error:",
-        data.error?.message || "Unknown error"
+        "Gemini API error:",
+        data.error?.message || "Unknown Gemini API error"
       );
 
       return res.status(502).json({
         success: false,
-        message: "AI script generation failed."
+        message:
+          "Gemini AI script generation failed. Check Render logs."
       });
     }
 
-    res.json({
+    const generatedScript =
+      data.candidates?.[0]?.content?.parts
+        ?.map(part => part.text || "")
+        .join("")
+        .trim();
+
+    if (!generatedScript) {
+      console.error(
+        "Gemini returned no text:",
+        data.promptFeedback?.blockReason || "No text available"
+      );
+
+      return res.status(502).json({
+        success: false,
+        message:
+          "Gemini did not return a script. Please try another topic."
+      });
+    }
+
+    return res.json({
       success: true,
-      script:
-        data.output_text || "No script was generated."
+      script: generatedScript
     });
 
   } catch (error) {
     console.error(
-      "Script error:",
+      "Gemini script error:",
       error.message
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Server error while generating script"
+      message: "Server error while generating script."
     });
   }
 });
