@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -7,54 +6,87 @@
 <title>AI YouTube Manager</title>
 
 <style>
-*{box-sizing:border-box}
-body{
- margin:0;
- background:#10131d;
- color:white;
- font-family:Arial,sans-serif;
- padding:18px;
+* {
+  box-sizing: border-box;
 }
-.container{max-width:650px;margin:auto}
-h1{text-align:center;color:#ff4444}
-.card{
- background:#1d2332;
- padding:18px;
- border-radius:14px;
- margin:15px 0;
+
+body {
+  margin: 0;
+  background: #10131d;
+  color: white;
+  font-family: Arial, sans-serif;
+  padding: 18px;
 }
-button{
- background:#ff3333;
- color:white;
- border:0;
- padding:13px 18px;
- border-radius:8px;
- font-size:16px;
- cursor:pointer;
- margin:5px 0;
+
+.container {
+  max-width: 650px;
+  margin: auto;
 }
-input,textarea{
- width:100%;
- padding:12px;
- margin:10px 0;
- background:#10131d;
- color:white;
- border:1px solid #555;
- border-radius:8px;
+
+h1 {
+  text-align: center;
+  color: #ff4444;
 }
-textarea{min-height:150px}
-.preview{
- width:100%;
- margin-top:10px;
- border-radius:8px;
+
+.card {
+  background: #1d2332;
+  padding: 18px;
+  border-radius: 14px;
+  margin: 15px 0;
 }
-.small{color:#aaa;font-size:13px}
-.status{color:#55dd88}
-.error{color:#ff7777}
+
+button {
+  background: #ff3333;
+  color: white;
+  border: 0;
+  padding: 13px 18px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  margin: 5px 0;
+}
+
+button:hover {
+  background: #cc2222;
+}
+
+input, textarea {
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  background: #10131d;
+  color: white;
+  border: 1px solid #555;
+  border-radius: 8px;
+}
+
+textarea {
+  min-height: 150px;
+}
+
+.preview {
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+.small {
+  color: #aaa;
+  font-size: 13px;
+}
+
+.status {
+  color: #55dd88;
+}
+
+.error {
+  color: #ff7777;
+}
 </style>
 </head>
 
 <body>
+
 <div class="container">
 
 <h1>▶ AI YouTube Manager</h1>
@@ -63,7 +95,10 @@ textarea{min-height:150px}
 Your Personal YouTube Dashboard
 </p>
 
+<!-- YouTube Connection -->
+
 <div class="card">
+
 <h3>🔴 YouTube Channel</h3>
 
 <p id="connection">
@@ -77,45 +112,64 @@ Connect YouTube
 <button onclick="checkYouTubeStatus()">
 Refresh Connection
 </button>
+
 </div>
 
+<!-- AI Script Generator -->
+
 <div class="card">
+
 <h3>🤖 AI Video Script</h3>
 
-<input id="topic"
-placeholder="Enter your video topic">
+<input
+id="topic"
+placeholder="Enter your video topic"
+>
 
 <button onclick="generateScript()">
 Generate Script
 </button>
 
-<textarea id="script"
-placeholder="Your video script will appear here"></textarea>
+<textarea
+id="script"
+placeholder="Your video script will appear here"
+></textarea>
 
 <p class="small">
-Basic demo script generator.
+AI Video Script Generator
 </p>
+
 </div>
 
+<!-- Video Upload -->
+
 <div class="card">
+
 <h3>🎬 Select Video</h3>
 
-<input type="file"
+<input
+type="file"
 id="video"
-accept="video/*">
+accept="video/*"
+>
 
-<video id="videoPreview"
+<video
+id="videoPreview"
 class="preview"
 controls
-style="display:none">
-</video>
+style="display:none"
+></video>
 
 <p id="videoStatus" class="small">
 No video selected
 </p>
+
 </div>
 
+<!-- Backend Status -->
+
 <div class="card">
+
 <h3>📡 Backend Status</h3>
 
 <p id="backendStatus">
@@ -125,180 +179,252 @@ Checking server...
 <button onclick="checkBackend()">
 Check Backend
 </button>
+
 </div>
 
+<!-- Dashboard -->
+
 <div class="card">
+
 <h3>📊 Dashboard</h3>
+
 <p>Welcome to AI YouTube Manager!</p>
-<p class="status">Dashboard Loaded Successfully</p>
+
+<p class="status">
+Dashboard Loaded Successfully
+</p>
+
 </div>
 
 </div>
 
 <script>
+
+// BACKEND URL
+
 const API_URL =
 "https://ai-youtube-manager-iw6j.onrender.com";
 
-function connect(){
- document.getElementById("connection").textContent =
- "Connecting to Google...";
 
- window.location.href = API_URL + "/auth/google";
+// CONNECT YOUTUBE
+
+function connect() {
+
+  document.getElementById("connection").textContent =
+  "Connecting to Google...";
+
+  window.location.href = API_URL + "/auth/google";
+
 }
 
-async function checkYouTubeStatus(){
 
- const connection =
- document.getElementById("connection");
+// CHECK YOUTUBE CONNECTION
 
- connection.textContent = "Checking YouTube connection...";
+async function checkYouTubeStatus() {
 
- try{
-
-  const response = await fetch(
-   API_URL + "/api/youtube/status",
-   {
-    method:"GET",
-   }
-  );
-
-  if(!response.ok){
-   throw new Error("Status API error: " + response.status);
-  }
-
-  const data = await response.json();
-
-  if(data.connected){
-
-   connection.textContent =
-    "YouTube Connected Successfully! Channel: " +
-    (data.channel || data.channelName || "Connected");
-
-   connection.className = "status";
-
-  }else{
-
-   connection.textContent =
-    "YouTube channel not connected";
-
-   connection.className = "error";
-  }
-
- }catch(error){
+  const connection =
+  document.getElementById("connection");
 
   connection.textContent =
-   "Connection check failed. Please try again.";
+  "Checking YouTube connection...";
 
-  connection.className = "error";
+  try {
 
-async function generateScript(){
+    const response = await fetch(
+      API_URL + "/api/youtube/status",
+      {
+        method: "GET"
+      }
+    );
 
- const topic =
- document.getElementById("topic").value.trim();
+    if (!response.ok) {
+      throw new Error(
+        "Status API error: " + response.status
+      );
+    }
 
- const result =
- document.getElementById("script");
+    const data = await response.json();
 
- if(!topic){
-  alert("Please enter your video topic.");
-  return;
- }
+    if (data.connected) {
 
- result.value = "AI is generating your script...";
+      connection.textContent =
+      "YouTube Connected Successfully! Channel: " +
+      (data.channel || data.channelName || "Connected");
 
- try{
+      connection.className = "status";
 
-  const response = await fetch(
-   API_URL + "/api/generate-script",
-   {
-    method: "POST",
-    headers: {
-     "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-     topic: topic,
-     language: "Hindi",
-     style: "Engaging"
-    })
-   }
-  );
+    } else {
 
-  const data = await response.json();
+      connection.textContent =
+      "YouTube channel not connected";
 
-  if(!response.ok || !data.success){
-   throw new Error(data.message || "AI generation failed.");
+      connection.className = "error";
+
+    }
+
+  } catch (error) {
+
+    connection.textContent =
+    "Connection check failed. Please try again.";
+
+    connection.className = "error";
+
+    console.error("YouTube Status Error:", error);
+
   }
 
-  result.value = data.script;
-
- }catch(error){
-
-  result.value = "Error: " + error.message;
-  console.error("AI Script Error:", error);
-
- }
 }
 
+
+// AI SCRIPT GENERATOR
+
+async function generateScript() {
+
+  const topic =
+  document.getElementById("topic").value.trim();
+
+  const result =
+  document.getElementById("script");
+
+  if (!topic) {
+
+    alert("Please enter your video topic.");
+
+    return;
+
+  }
+
+  result.value =
+  "AI is generating your script...";
+
+  try {
+
+    const response = await fetch(
+      API_URL + "/api/generate-script",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+          topic: topic,
+          language: "Hindi",
+          style: "Engaging"
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+
+      throw new Error(
+        data.message || "AI generation failed."
+      );
+
+    }
+
+    result.value = data.script || "No script received.";
+
+  } catch (error) {
+
+    result.value =
+    "Error: " + error.message;
+
+    console.error("AI Script Error:", error);
+
+  }
+
+}
+
+
+// VIDEO PREVIEW
 
 document.getElementById("video").addEventListener(
- "change",
- function(){
+  "change",
+  function() {
 
-  const file = this.files[0];
+    const file = this.files[0];
 
-  if(!file)return;
+    if (!file) return;
 
-  if(!file.type.startsWith("video/")){
-   alert("Please select a video file.");
-   return;
+    if (!file.type.startsWith("video/")) {
+
+      alert("Please select a video file.");
+
+      this.value = "";
+
+      return;
+
+    }
+
+    const url = URL.createObjectURL(file);
+
+    const preview =
+    document.getElementById("videoPreview");
+
+    preview.src = url;
+
+    preview.style.display = "block";
+
+    document.getElementById("videoStatus").textContent =
+    "Selected: " + file.name;
+
   }
-
-  const url = URL.createObjectURL(file);
-
-  const preview =
-   document.getElementById("videoPreview");
-
-  preview.src = url;
-  preview.style.display = "block";
-
-  document.getElementById("videoStatus").textContent =
-   "Selected: " + file.name;
- }
 );
 
-async function checkBackend(){
 
- const status =
- document.getElementById("backendStatus");
+// CHECK BACKEND
 
- status.textContent = "Checking...";
+async function checkBackend() {
 
- try{
+  const status =
+  document.getElementById("backendStatus");
 
-  const response = await fetch(
-   API_URL + "/api/health"
-  );
+  status.textContent = "Checking...";
 
-  if(!response.ok){
-   throw new Error("Server error");
+  try {
+
+    const response = await fetch(
+      API_URL + "/api/health"
+    );
+
+    if (!response.ok) {
+
+      throw new Error("Server error: " + response.status);
+
+    }
+
+    const data = await response.json();
+
+    status.textContent =
+    (data.message || "Server running") +
+    " Status: " + (data.status || "OK");
+
+    status.className = "status";
+
+  } catch (error) {
+
+    status.textContent =
+    "Backend connection failed.";
+
+    status.className = "error";
+
+    console.error("Backend Error:", error);
+
   }
 
-  const data = await response.json();
-
-  status.textContent =
-   (data.message || "Server running") +
-   " Status: " + (data.status || "OK");
-
- }catch(error){
-
-  status.textContent =
-   "Backend connection failed.";
-
- }
 }
 
+
+// INITIAL CHECKS
+
 checkBackend();
+
 checkYouTubeStatus();
+
 </script>
 
 </body>
