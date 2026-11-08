@@ -87,9 +87,30 @@ Your Personal YouTube Dashboard
 
 <div class="card">
 <h3>🔴 YouTube Channel</h3>
+
 <p id="connection">Checking YouTube connection...</p>
+
 <button onclick="connect()">Connect YouTube</button>
 <button onclick="checkYouTubeStatus()">Refresh Connection</button>
+
+<hr>
+
+<h3>📺 Select Active Channel</h3>
+
+<select id="channelSelect">
+<option value="">Loading channels...</option>
+</select>
+
+<button id="selectChannelBtn" onclick="selectChannel()">
+Select Channel
+</button>
+
+<button onclick="loadChannels()">Refresh Channel List</button>
+
+<p id="channelStatus" class="small">
+Loading channel list...
+</p>
+
 </div>
 
 <div class="card">
@@ -104,7 +125,6 @@ Your Personal YouTube Dashboard
 <p class="small">AI Video Script Generator</p>
 </div>
 
-<!-- HINDI VOICEOVER PLAYER -->
 <div class="card">
 <h3>🎙️ Hindi AI Voiceover</h3>
 
@@ -114,22 +134,22 @@ Your Personal YouTube Dashboard
 
 <label for="voiceSelect">Voice Select करें:</label>
 <select id="voiceSelect">
-  <option value="">Hindi voice loading...</option>
+<option value="">Hindi voice loading...</option>
 </select>
 
 <label for="voiceRate">Voice Speed:</label>
 <select id="voiceRate">
-  <option value="0.85">Slow</option>
-  <option value="0.95" selected>Normal</option>
-  <option value="1">Natural</option>
-  <option value="1.1">Fast</option>
+<option value="0.85">Slow</option>
+<option value="0.95" selected>Normal</option>
+<option value="1">Natural</option>
+<option value="1.1">Fast</option>
 </select>
 
 <div class="voice-buttons">
-  <button onclick="playVoice()">▶ Play Voice</button>
-  <button onclick="pauseVoice()">⏸ Pause</button>
-  <button onclick="resumeVoice()">▶ Resume</button>
-  <button onclick="stopVoice()">⏹ Stop</button>
+<button onclick="playVoice()">▶ Play Voice</button>
+<button onclick="pauseVoice()">⏸ Pause</button>
+<button onclick="resumeVoice()">▶ Resume</button>
+<button onclick="stopVoice()">⏹ Stop</button>
 </div>
 
 <p id="voiceStatus">Voiceover तैयार है।</p>
@@ -172,12 +192,14 @@ function connect() {
   window.location.href = API_URL + "/auth/google";
 }
 
+// YOUTUBE STATUS
 async function checkYouTubeStatus() {
   const connection = document.getElementById("connection");
   connection.textContent = "Checking YouTube connection...";
 
   try {
     const response = await fetch(API_URL + "/api/youtube/status");
+
     if (!response.ok) throw new Error("Status API error");
 
     const data = await response.json();
@@ -197,6 +219,119 @@ async function checkYouTubeStatus() {
   }
 }
 
+// LOAD MULTIPLE CHANNELS
+async function loadChannels() {
+  const select = document.getElementById("channelSelect");
+  const status = document.getElementById("channelStatus");
+
+  select.innerHTML = '<option value="">Loading channels...</option>';
+  status.textContent = "Loading channel list...";
+
+  try {
+    const response = await fetch(API_URL + "/api/youtube/channels");
+
+    if (!response.ok) {
+      throw new Error("Channel API error");
+    }
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.message || "Could not load channels");
+    }
+
+    const channels = data.channels || [];
+
+    select.innerHTML = "";
+
+    if (channels.length === 0) {
+      select.innerHTML =
+        '<option value="">No YouTube channel connected</option>';
+
+      status.textContent = "पहले YouTube Channel Connect करें।";
+      status.className = "error";
+      return;
+    }
+
+    channels.forEach(channel => {
+      const option = document.createElement("option");
+
+      option.value = channel.channelId;
+      option.textContent =
+        channel.channel + (channel.active ? " (Active)" : "");
+
+      if (channel.active) {
+        option.selected = true;
+      }
+
+      select.appendChild(option);
+    });
+
+    status.textContent =
+      "Total connected channels: " + channels.length;
+
+    status.className = "status";
+
+  } catch (error) {
+    select.innerHTML =
+      '<option value="">Could not load channels</option>';
+
+    status.textContent = "Channel loading failed: " + error.message;
+    status.className = "error";
+  }
+}
+
+// SELECT ACTIVE CHANNEL
+async function selectChannel() {
+  const select = document.getElementById("channelSelect");
+  const button = document.getElementById("selectChannelBtn");
+  const status = document.getElementById("channelStatus");
+
+  const channelId = select.value;
+
+  if (!channelId) {
+    status.textContent = "पहले Channel चुनें।";
+    status.className = "error";
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Selecting...";
+
+  try {
+    const response = await fetch(API_URL + "/api/youtube/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        channelId: channelId
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Channel selection failed");
+    }
+
+    status.textContent = "Active channel successfully changed!";
+    status.className = "status";
+
+    await loadChannels();
+    await checkYouTubeStatus();
+
+  } catch (error) {
+    status.textContent = "Error: " + error.message;
+    status.className = "error";
+
+  } finally {
+    button.disabled = false;
+    button.textContent = "Select Channel";
+  }
+}
+
+// AI SCRIPT GENERATOR
 async function generateScript() {
   const topic = document.getElementById("topic").value.trim();
   const result = document.getElementById("script");
@@ -227,6 +362,7 @@ async function generateScript() {
     }
 
     result.value = data.script || "No script received.";
+
   } catch (error) {
     result.value = "Error: " + error.message;
   }
@@ -238,8 +374,10 @@ let activeUtterance = null;
 
 function loadVoices() {
   const select = document.getElementById("voiceSelect");
+
   if (!("speechSynthesis" in window)) {
     select.innerHTML = '<option>Voice not supported</option>';
+
     document.getElementById("voiceStatus").textContent =
       "इस Browser में voice सुविधा उपलब्ध नहीं है।";
     return;
@@ -255,6 +393,7 @@ function loadVoices() {
 
   if (hindiVoices.length === 0) {
     select.innerHTML = '<option value="">Hindi voice नहीं मिली</option>';
+
     document.getElementById("voiceStatus").textContent =
       "फोन में Hindi Text-to-Speech voice उपलब्ध नहीं है।";
     return;
@@ -288,7 +427,11 @@ function playVoice() {
   stopVoice();
 
   const chunks = text.match(/[\s\S]{1,180}([।.!?\n]|$)/g) || [text];
-  const voiceIndex = Number(document.getElementById("voiceSelect").value);
+
+  const voiceIndex = Number(
+    document.getElementById("voiceSelect").value
+  );
+
   const selectedVoice = availableVoices.filter(v =>
     v.lang.toLowerCase().startsWith("hi")
   )[voiceIndex];
@@ -302,9 +445,13 @@ function playVoice() {
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(chunks[index].trim());
+    const utterance =
+      new SpeechSynthesisUtterance(chunks[index].trim());
+
     utterance.lang = "hi-IN";
-    utterance.rate = Number(document.getElementById("voiceRate").value);
+    utterance.rate =
+      Number(document.getElementById("voiceRate").value);
+
     utterance.pitch = 0.75;
 
     if (selectedVoice) utterance.voice = selectedVoice;
@@ -321,6 +468,7 @@ function playVoice() {
 
     activeUtterance = utterance;
     window.speechSynthesis.speak(utterance);
+
     status.textContent = "Voiceover चल रहा है...";
   }
 
@@ -330,14 +478,18 @@ function playVoice() {
 function pauseVoice() {
   if (window.speechSynthesis.speaking) {
     window.speechSynthesis.pause();
-    document.getElementById("voiceStatus").textContent = "Voice paused.";
+
+    document.getElementById("voiceStatus").textContent =
+      "Voice paused.";
   }
 }
 
 function resumeVoice() {
   if (window.speechSynthesis.paused) {
     window.speechSynthesis.resume();
-    document.getElementById("voiceStatus").textContent = "Voice resumed.";
+
+    document.getElementById("voiceStatus").textContent =
+      "Voice resumed.";
   }
 }
 
@@ -345,8 +497,11 @@ function stopVoice() {
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }
+
   activeUtterance = null;
+
   const status = document.getElementById("voiceStatus");
+
   if (status) status.textContent = "Voice stopped.";
 }
 
@@ -355,8 +510,10 @@ if ("speechSynthesis" in window) {
   window.speechSynthesis.onvoiceschanged = loadVoices;
 }
 
+// VIDEO PREVIEW
 document.getElementById("video").addEventListener("change", function() {
   const file = this.files[0];
+
   if (!file) return;
 
   if (!file.type.startsWith("video/")) {
@@ -367,6 +524,7 @@ document.getElementById("video").addEventListener("change", function() {
 
   const url = URL.createObjectURL(file);
   const preview = document.getElementById("videoPreview");
+
   preview.src = url;
   preview.style.display = "block";
 
@@ -374,27 +532,35 @@ document.getElementById("video").addEventListener("change", function() {
     "Selected: " + file.name;
 });
 
+// BACKEND STATUS
 async function checkBackend() {
   const status = document.getElementById("backendStatus");
   status.textContent = "Checking...";
 
   try {
     const response = await fetch(API_URL + "/api/health");
+
     if (!response.ok) throw new Error("Server error");
 
     const data = await response.json();
+
     status.textContent =
       (data.message || "Server running") +
       " Status: " + (data.status || "OK");
+
     status.className = "status";
+
   } catch (error) {
     status.textContent = "Backend connection failed.";
     status.className = "error";
   }
 }
 
+// STARTUP
 checkBackend();
 checkYouTubeStatus();
+loadChannels();
+
 </script>
 </body>
 </html>
