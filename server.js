@@ -34,19 +34,17 @@ app.set("trust proxy", 1);
 app.use(helmet());
 
 app.use(cors({
-  origin: function (origin, callback) {
+  origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-
     return callback(new Error("Origin not allowed"));
   }
 }));
 
 app.use(express.json({ limit: "1mb" }));
 
-// YouTube connection
-let youtubeConnection = null;
+let activeChannelId = null;
 
 
 // =====================================
@@ -69,7 +67,6 @@ function encryptToken(value) {
   if (!value) return null;
 
   const iv = crypto.randomBytes(12);
-
   const cipher = crypto.createCipheriv(
     "aes-256-gcm",
     getEncryptionKey(),
@@ -81,11 +78,9 @@ function encryptToken(value) {
     cipher.final()
   ]);
 
-  const tag = cipher.getAuthTag();
-
   return [
     iv.toString("hex"),
-    tag.toString("hex"),
+    cipher.getAuthTag().toString("hex"),
     encrypted.toString("hex")
   ].join(".");
 }
@@ -94,7 +89,6 @@ function decryptToken(value) {
   if (!value) return null;
 
   const parts = value.split(".");
-
   if (parts.length !== 3) {
     throw new Error("Stored token format is invalid.");
   }
@@ -119,10 +113,11 @@ function decryptToken(value) {
 
 
 // =====================================
-// DATABASE
+// DATABASE AND SAFE MIGRATION
 // =====================================
 
 async function initializeDatabase() {
+  // Keep the old table so its existing data is not deleted.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS youtube_connection (
       id INTEGER PRIMARY KEY,
@@ -141,73 +136,196 @@ async function initializeDatabase() {
     )
   `);
 
-  console.log("Database table is ready.");
-}
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS youtube_connections (
+      channel_id TEXT PRIMARY KEY,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT,
+      expires_at BIGINT NOT NULL,
+      channel TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
-async function saveYouTubeConnection(connection) {
-  await pool.query(
-    `INSERT INTO youtube_connection
-      (id, access_token, refresh_token, expires_at, channel, channel_id)
-     VALUES (1, $1, $2, $3, $4, $5)
-     ON CONFLICT (id) DO UPDATE SET
-       access_token = EXCLUDED.access_token,
-       refresh_token = EXCLUDED.refresh_token,
-       expires_at = EXCLUDED.expires_at,
-       channel = EXCLUDED.channel,
-       channel_id = EXCLUDED.channel_id`,
-    [
-      encryptToken(connection.accessToken),
-      encryptToken(connection.refreshToken),
-      connection.expiresAt,
-      connection.channel,
-      connection.channelId
-    ]
-  );
-}
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS youtube_settings (
+      id INTEGER PRIMARY KEY,
+      active_channel_id TEXT
+    )
+  `);
 
-async function loadYouTubeConnection() {
-  const result = await pool.query(
-    `SELECT * FROM youtube_connection WHERE id = 1`
-  );
+  await pool.query(`
+    INSERT INTO youtube_settings (id, active_channel_id)
+    VALUES (1, NULL)
+    ON CONFLICT (id) DO NOTHING
+  `);
 
-  if (result.rows.length === 0) {
-    youtubeConnection = null;
-    console.log("No saved YouTube connection.");
-    return;
+  // Migrate the previously connected channel.
+  const old = await pool.query(`
+    SELECT * FROM youtube_connection WHERE id = 1
+  `);
+
+  if (old.rows.length > 0) {
+    const row = old.rows[0];
+
+    if (row.channel_id) {
+      await pool.query(
+        `INSERT INTO youtube_connections
+          (channel_id, access_token, refresh_token,
+           expires_at, channel)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (channel_id) DO NOTHING`,
+        [
+          row.channel_id,
+          row.access_token,
+          row.refresh_token,
+          row.expires_at,
+          row.channel
+        ]
+      );
+
+      await pool.query(
+        `UPDATE youtube_settings
+         SET active_channel_id = COALESCE(active_channel_id, $1)
+         WHERE id = 1`,
+        [row.channel_id]
+      );
+    }
   }
 
-  const row = result.rows[0];
-
-  youtubeConnection = {
-    accessToken: decryptToken(row.access_token),
-    refreshToken: decryptToken(row.refresh_token),
-    expiresAt: Number(row.expires_at),
-    channel: row.channel,
-    channelId: row.channel_id
-  };
-
-  console.log("Saved YouTube connection loaded.");
-}
-
-async function deleteYouTubeConnection() {
-  await pool.query(
-    `DELETE FROM youtube_connection WHERE id = 1`
+  const setting = await pool.query(
+    `SELECT active_channel_id
+     FROM youtube_settings WHERE id = 1`
   );
 
-  youtubeConnection = null;
+  activeChannelId =
+    setting.rows[0]?.active_channel_id || null;
+
+  console.log("Multi-channel database is ready.");
 }
 
 
 // =====================================
-// COOKIE AND OAUTH HELPERS
+// CHANNEL DATABASE HELPERS
+// =====================================
+
+async function saveChannel(connection) {
+  await pool.query(
+    `INSERT INTO youtube_connections
+      (channel_id, access_token, refresh_token,
+       expires_at, channel, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (channel_id) DO UPDATE SET
+       access_token = EXCLUDED.access_token,
+       refresh_token = COALESCE(
+         EXCLUDED.refresh_token,
+         youtube_connections.refresh_token
+       ),
+       expires_at = EXCLUDED.expires_at,
+       channel = EXCLUDED.channel,
+       updated_at = NOW()`,
+    [
+      connection.channelId,
+      encryptToken(connection.accessToken),
+      encryptToken(connection.refreshToken),
+      connection.expiresAt,
+      connection.channel
+    ]
+  );
+
+  if (!activeChannelId) {
+    await selectChannel(connection.channelId);
+  }
+}
+
+async function getChannel(channelId) {
+  const result = await pool.query(
+    `SELECT * FROM youtube_connections
+     WHERE channel_id = $1`,
+    [channelId]
+  );
+
+  if (!result.rows.length) return null;
+
+  const row = result.rows[0];
+
+  return {
+    channelId: row.channel_id,
+    channel: row.channel,
+    accessToken: decryptToken(row.access_token),
+    refreshToken: decryptToken(row.refresh_token),
+    expiresAt: Number(row.expires_at)
+  };
+}
+
+async function selectChannel(channelId) {
+  const channel = await getChannel(channelId);
+
+  if (!channel) {
+    throw new Error("YouTube channel not found.");
+  }
+
+  await pool.query(
+    `UPDATE youtube_settings
+     SET active_channel_id = $1 WHERE id = 1`,
+    [channelId]
+  );
+
+  activeChannelId = channelId;
+  return channel;
+}
+
+async function getAllChannels() {
+  const result = await pool.query(
+    `SELECT channel_id, channel, created_at
+     FROM youtube_connections
+     ORDER BY created_at ASC`
+  );
+
+  return result.rows.map(row => ({
+    channelId: row.channel_id,
+    channel: row.channel,
+    connected: true,
+    active: row.channel_id === activeChannelId
+  }));
+}
+
+async function deleteChannel(channelId) {
+  await pool.query(
+    `DELETE FROM youtube_connections
+     WHERE channel_id = $1`,
+    [channelId]
+  );
+
+  if (activeChannelId === channelId) {
+    const remaining = await pool.query(
+      `SELECT channel_id FROM youtube_connections
+       ORDER BY created_at ASC LIMIT 1`
+    );
+
+    const nextId = remaining.rows[0]?.channel_id || null;
+
+    await pool.query(
+      `UPDATE youtube_settings
+       SET active_channel_id = $1 WHERE id = 1`,
+      [nextId]
+    );
+
+    activeChannelId = nextId;
+  }
+}
+
+
+// =====================================
+// OAUTH HELPERS
 // =====================================
 
 function readCookies(header = "") {
   const cookies = {};
 
-  header.split(";").filter(Boolean).forEach((item) => {
+  header.split(";").filter(Boolean).forEach(item => {
     const separator = item.indexOf("=");
-
     if (separator === -1) return;
 
     const name = item.slice(0, separator).trim();
@@ -233,29 +351,21 @@ function createOAuthState(nonce) {
 function isValidOAuthState(state, cookieState) {
   if (
     typeof state !== "string" ||
-    typeof cookieState !== "string"
-  ) {
-    return false;
-  }
-
-  if (state !== cookieState) return false;
+    typeof cookieState !== "string" ||
+    state !== cookieState
+  ) return false;
 
   const parts = state.split(".");
-
   if (parts.length !== 2) return false;
 
-  const [nonce, suppliedSignature] = parts;
-  const expectedSignature = createOAuthState(nonce);
+  const [nonce, signature] = parts;
+  const expected = createOAuthState(nonce);
 
-  if (
-    suppliedSignature.length !== expectedSignature.length
-  ) {
-    return false;
-  }
+  if (signature.length !== expected.length) return false;
 
   return crypto.timingSafeEqual(
-    Buffer.from(suppliedSignature),
-    Buffer.from(expectedSignature)
+    Buffer.from(signature),
+    Buffer.from(expected)
   );
 }
 
@@ -270,26 +380,23 @@ function oauthIsConfigured() {
 
 
 // =====================================
-// YOUTUBE TOKEN REFRESH
+// TOKEN REFRESH
 // =====================================
 
-async function refreshYouTubeAccessToken() {
-  if (!youtubeConnection) {
-    throw new Error("YouTube account is not connected.");
+async function refreshChannelToken(channelId) {
+  const channel = await getChannel(channelId);
+
+  if (!channel) {
+    throw new Error("YouTube channel is not connected.");
   }
 
-  if (
-    youtubeConnection.expiresAt >
-    Date.now() + 60000
-  ) {
-    return youtubeConnection.accessToken;
+  if (channel.expiresAt > Date.now() + 60000) {
+    return channel;
   }
 
-  if (!youtubeConnection.refreshToken) {
-    await deleteYouTubeConnection();
-
+  if (!channel.refreshToken) {
     throw new Error(
-      "Google refresh token is missing. Please connect YouTube again."
+      "Refresh token missing. Reconnect this channel."
     );
   }
 
@@ -303,7 +410,7 @@ async function refreshYouTubeAccessToken() {
       body: new URLSearchParams({
         client_id: process.env.GOOGLE_CLIENT_ID,
         client_secret: process.env.GOOGLE_CLIENT_SECRET,
-        refresh_token: youtubeConnection.refreshToken,
+        refresh_token: channel.refreshToken,
         grant_type: "refresh_token"
       })
     }
@@ -313,49 +420,41 @@ async function refreshYouTubeAccessToken() {
 
   if (!response.ok || !data.access_token) {
     console.error(
-      "Google token refresh failed:",
+      "Token refresh failed:",
       data.error || "Unknown error"
     );
 
     if (data.error === "invalid_grant") {
-      await deleteYouTubeConnection();
+      await deleteChannel(channelId);
     }
 
     throw new Error(
-      "Could not refresh Google access. Please connect YouTube again."
+      "Could not refresh channel. Please reconnect it."
     );
   }
 
-  youtubeConnection.accessToken = data.access_token;
-
-  youtubeConnection.expiresAt =
-    Date.now() +
-    (Number(data.expires_in || 3600) * 1000);
+  channel.accessToken = data.access_token;
+  channel.expiresAt =
+    Date.now() + Number(data.expires_in || 3600) * 1000;
 
   if (data.refresh_token) {
-    youtubeConnection.refreshToken = data.refresh_token;
+    channel.refreshToken = data.refresh_token;
   }
 
-  await saveYouTubeConnection(youtubeConnection);
-
-  return youtubeConnection.accessToken;
+  await saveChannel(channel);
+  return channel;
 }
 
 
 // =====================================
-// HOME PAGE
+// HOME AND HEALTH
 // =====================================
 
 app.get("/", (req, res) => {
   res.type("text").send(
-    "AI YouTube Manager backend is running."
+    "AI YouTube Manager multi-channel backend is running."
   );
 });
-
-
-// =====================================
-// HEALTH CHECK
-// =====================================
 
 app.get("/api/health", async (req, res) => {
   try {
@@ -367,9 +466,8 @@ app.get("/api/health", async (req, res) => {
       database: "connected",
       status: "OK"
     });
-
   } catch (error) {
-    console.error("Health check error:", error.message);
+    console.error("Health check:", error.message);
 
     res.status(503).json({
       success: false,
@@ -391,12 +489,9 @@ app.get("/auth/google", (req, res) => {
   }
 
   const nonce = crypto.randomBytes(32).toString("hex");
+  const state = `${nonce}.${createOAuthState(nonce)}`;
 
-  const state =
-    `${nonce}.${createOAuthState(nonce)}`;
-
-  const secureCookie =
-    REDIRECT_URI.startsWith("https://");
+  const secureCookie = REDIRECT_URI.startsWith("https://");
 
   res.cookie("oauth_state", state, {
     httpOnly: true,
@@ -414,7 +509,7 @@ app.get("/auth/google", (req, res) => {
       "https://www.googleapis.com/auth/youtube.readonly " +
       "https://www.googleapis.com/auth/youtube.upload",
     access_type: "offline",
-    prompt: "consent",
+    prompt: "consent select_account",
     state
   });
 
@@ -431,8 +526,7 @@ app.get("/auth/google", (req, res) => {
 
 app.get("/auth/google/callback", async (req, res) => {
   const secureCookie = Boolean(
-    REDIRECT_URI &&
-    REDIRECT_URI.startsWith("https://")
+    REDIRECT_URI && REDIRECT_URI.startsWith("https://")
   );
 
   const cookies = readCookies(req.headers.cookie);
@@ -453,13 +547,13 @@ app.get("/auth/google/callback", async (req, res) => {
 
   if (!isValidOAuthState(state, cookies.oauth_state)) {
     return res.status(403).send(
-      "Invalid OAuth state. Please start the connection again."
+      "Invalid OAuth state. Please try again."
     );
   }
 
   if (req.query.error) {
     return res.status(400).send(
-      "Google authorization was not completed. Please try again."
+      "Google authorization was not completed."
     );
   }
 
@@ -521,37 +615,30 @@ app.get("/auth/google/callback", async (req, res) => {
       );
 
       return res.status(502).send(
-        "Could not retrieve YouTube channel. Check YouTube API access."
+        "Could not retrieve YouTube channel."
       );
     }
 
-    if (
-      !channelData.items ||
-      channelData.items.length === 0
-    ) {
+    if (!channelData.items?.length) {
       return res.status(404).send(
-        "No YouTube channel was found for this Google account."
+        "No YouTube channel was found."
       );
     }
 
-    youtubeConnection = {
+    const item = channelData.items[0];
+
+    const connection = {
       accessToken: tokens.access_token,
-      refreshToken:
-        tokens.refresh_token ||
-        youtubeConnection?.refreshToken ||
-        null,
+      refreshToken: tokens.refresh_token || null,
       expiresAt:
-        Date.now() +
-        (Number(tokens.expires_in || 3600) * 1000),
-      channel:
-        channelData.items[0].snippet?.title ||
-        "YouTube Channel",
-      channelId: channelData.items[0].id
+        Date.now() + Number(tokens.expires_in || 3600) * 1000,
+      channel: item.snippet?.title || "YouTube Channel",
+      channelId: item.id
     };
 
-    await saveYouTubeConnection(youtubeConnection);
+    await saveChannel(connection);
 
-    const safeChannel = String(youtubeConnection.channel)
+    const safeChannel = String(connection.channel)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
@@ -561,14 +648,14 @@ app.get("/auth/google/callback", async (req, res) => {
     res.send(`
       <!doctype html>
       <html lang="en">
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-        </head>
-        <body>
-          <h2>YouTube Connected Successfully!</h2>
-          <p>Channel: ${safeChannel}</p>
-          <p>You can close this page and return to AI YouTube Manager.</p>
-        </body>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body>
+        <h2>YouTube Connected Successfully!</h2>
+        <p>Channel: ${safeChannel}</p>
+        <p>You can close this page and return to AI YouTube Manager.</p>
+      </body>
       </html>
     `);
 
@@ -583,29 +670,52 @@ app.get("/auth/google/callback", async (req, res) => {
 
 
 // =====================================
-// YOUTUBE CONNECTION STATUS
+// LIST ALL CONNECTED CHANNELS
+// =====================================
+
+app.get("/api/youtube/channels", async (req, res) => {
+  try {
+    const channels = await getAllChannels();
+
+    res.json({
+      success: true,
+      channels,
+      activeChannelId
+    });
+  } catch (error) {
+    console.error("Channel list error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Could not load channels."
+    });
+  }
+});
+
+
+// =====================================
+// ACTIVE CHANNEL STATUS
 // =====================================
 
 app.get("/api/youtube/status", async (req, res) => {
-  if (!youtubeConnection) {
-    return res.json({
-      connected: false,
-      channel: null,
-      channelId: null
-    });
-  }
-
   try {
-    await refreshYouTubeAccessToken();
+    if (!activeChannelId) {
+      return res.json({
+        connected: false,
+        channel: null,
+        channelId: null
+      });
+    }
 
-    return res.json({
+    const channel = await refreshChannelToken(activeChannelId);
+
+    res.json({
       connected: true,
-      channel: youtubeConnection.channel,
-      channelId: youtubeConnection.channelId
+      channel: channel.channel,
+      channelId: channel.channelId
     });
-
   } catch (error) {
-    return res.json({
+    res.json({
       connected: false,
       channel: null,
       channelId: null,
@@ -616,50 +726,96 @@ app.get("/api/youtube/status", async (req, res) => {
 
 
 // =====================================
-// DISCONNECT YOUTUBE ACCOUNT
+// SELECT ACTIVE CHANNEL
 // =====================================
 
-app.post("/api/youtube/disconnect", async (req, res) => {
-  if (youtubeConnection?.accessToken) {
-    try {
-      await fetch(
-        "https://oauth2.googleapis.com/revoke",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
-          body: new URLSearchParams({
-            token: youtubeConnection.accessToken
-          })
-        }
-      );
-
-    } catch (error) {
-      console.error(
-        "Google token revoke error:",
-        error.message
-      );
-    }
-  }
-
+app.post("/api/youtube/select", async (req, res) => {
   try {
-    await deleteYouTubeConnection();
+    const channelId = req.body?.channelId;
+
+    if (
+      typeof channelId !== "string" ||
+      !channelId.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Channel ID is required."
+      });
+    }
+
+    const channel = await selectChannel(channelId);
 
     res.json({
       success: true,
-      connected: false
+      channel: channel.channel,
+      channelId: channel.channelId
     });
-
   } catch (error) {
-    console.error(
-      "Disconnect database error:",
-      error.message
-    );
+    res.status(404).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+
+// =====================================
+// DISCONNECT ONE CHANNEL
+// =====================================
+
+app.post("/api/youtube/disconnect", async (req, res) => {
+  try {
+    const channelId =
+      req.body?.channelId || activeChannelId;
+
+    if (!channelId) {
+      return res.status(400).json({
+        success: false,
+        message: "No channel selected."
+      });
+    }
+
+    const channel = await getChannel(channelId);
+
+    if (!channel) {
+      return res.status(404).json({
+        success: false,
+        message: "Channel not found."
+      });
+    }
+
+    if (channel.accessToken) {
+      try {
+        await fetch(
+          "https://oauth2.googleapis.com/revoke",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: new URLSearchParams({
+              token: channel.accessToken
+            })
+          }
+        );
+      } catch (error) {
+        console.error("Token revoke error:", error.message);
+      }
+    }
+
+    await deleteChannel(channelId);
+
+    res.json({
+      success: true,
+      channels: await getAllChannels(),
+      activeChannelId
+    });
+  } catch (error) {
+    console.error("Disconnect error:", error.message);
 
     res.status(500).json({
       success: false,
-      message: "Could not remove YouTube connection."
+      message: "Could not disconnect channel."
     });
   }
 });
@@ -680,16 +836,9 @@ app.post("/api/generate-script", async (req, res) => {
       });
     }
 
-    const {
-      topic,
-      language,
-      style
-    } = req.body || {};
+    const { topic, language, style } = req.body || {};
 
-    if (
-      typeof topic !== "string" ||
-      !topic.trim()
-    ) {
+    if (typeof topic !== "string" || !topic.trim()) {
       return res.status(400).json({
         success: false,
         message: "Please enter a video topic."
@@ -730,16 +879,10 @@ Do not add unnecessary explanations.
           "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: prompt
-                }
-              ]
-            }
-          ],
+          contents: [{
+            role: "user",
+            parts: [{ text: prompt }]
+          }],
           generationConfig: {
             temperature: 0.8,
             maxOutputTokens: 1500
@@ -753,13 +896,12 @@ Do not add unnecessary explanations.
     if (!response.ok) {
       console.error(
         "Gemini API error:",
-        data.error?.message || "Unknown Gemini API error"
+        data.error?.message || "Unknown error"
       );
 
       return res.status(502).json({
         success: false,
-        message:
-          "Gemini AI script generation failed. Check Render logs."
+        message: "Gemini AI script generation failed. Check Render logs."
       });
     }
 
@@ -770,30 +912,21 @@ Do not add unnecessary explanations.
         .trim();
 
     if (!generatedScript) {
-      console.error(
-        "Gemini returned no text:",
-        data.promptFeedback?.blockReason || "No text available"
-      );
-
       return res.status(502).json({
         success: false,
-        message:
-          "Gemini did not return a script. Please try another topic."
+        message: "Gemini did not return a script."
       });
     }
 
-    return res.json({
+    res.json({
       success: true,
       script: generatedScript
     });
 
   } catch (error) {
-    console.error(
-      "Gemini script error:",
-      error.message
-    );
+    console.error("Gemini script error:", error.message);
 
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       message: "Server error while generating script."
     });
@@ -804,107 +937,6 @@ Do not add unnecessary explanations.
 // =====================================
 // UNKNOWN API ROUTE
 // =====================================
-
-// =====================================
-// HINDI AI MALE VOICEOVER - MP3
-// =====================================
-
-app.post("/api/generate-voiceover", async (req, res) => {
-  try {
-    const apiKey = process.env.GOOGLE_TTS_API_KEY;
-
-    if (!apiKey) {
-      return res.status(500).json({
-        success: false,
-        message: "Google TTS API key is missing."
-      });
-    }
-
-    const { text: scriptText } = req.body || {};
-
-    if (
-      typeof scriptText !== "string" ||
-      !scriptText.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Please enter a script for voiceover."
-      });
-    }
-
-    if (scriptText.length > 4500) {
-      return res.status(400).json({
-        success: false,
-        message: "Script is too long. Please use up to 4500 characters."
-      });
-    }
-
-    const response = await fetch(
-      "https://texttospeech.googleapis.com/v1/text:synthesize?key=" +
-      encodeURIComponent(apiKey),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          input: {
-            text: scriptText.trim()
-          },
-          voice: {
-            languageCode: "hi-IN",
-            name: "hi-IN-Neural2-C",
-            ssmlGender: "MALE"
-          },
-          audioConfig: {
-            audioEncoding: "MP3",
-            speakingRate: 0.92,
-            pitch: -2.5
-          }
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok || !data.audioContent) {
-      console.error(
-        "Google TTS error:",
-        data.error?.message || "Unknown error"
-      );
-
-      return res.status(502).json({
-        success: false,
-        message: "Voiceover generation failed. Check Render logs."
-      });
-    }
-
-    const audioBuffer = Buffer.from(
-      data.audioContent,
-      "base64"
-    );
-
-    res.set({
-      "Content-Type": "audio/mpeg",
-      "Content-Disposition": 'attachment; filename="Hindi-Voiceover.mp3"',
-      "Content-Length": audioBuffer.length,
-      "Cache-Control": "no-store"
-    });
-
-    return res.send(audioBuffer);
-
-  } catch (error) {
-    console.error(
-      "Voiceover error:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Server error while generating voiceover."
-    });
-  }
-});
 
 app.use("/api", (req, res) => {
   res.status(404).json({
@@ -936,14 +968,11 @@ async function startServer() {
   try {
     await initializeDatabase();
 
-    await loadYouTubeConnection();
-
     app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `AI YouTube Manager server running on port ${PORT}`
       );
     });
-
   } catch (error) {
     console.error(
       "Database startup failed:",
