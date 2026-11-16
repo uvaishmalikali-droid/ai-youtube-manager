@@ -965,7 +965,7 @@ app.post(
           "https://www.youtube.com/watch?v=" + result.data.id
       });
 
-    } catch (error) {
+        } catch (error) {
       console.error("YouTube upload error:", error.message);
 
       res.status(500).json({
