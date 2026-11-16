@@ -45,7 +45,34 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "1mb" }));
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024
+  },
+  fileFilter: (req, file, callback) => {
+    if (!file.mimetype.startsWith("video/")) {
+      return callback(new Error("Only video files are allowed."));
+    }
+    callback(null, true);
+  }
+});
 
+function verifyUploadSecret(req, res, next) {
+  const secret = req.headers["x-upload-secret"];
+
+  if (
+    !process.env.UPLOAD_BOT_SECRET ||
+    secret !== process.env.UPLOAD_BOT_SECRET
+  ) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized upload request."
+    });
+  }
+
+  next();
+}
 let activeChannelId = null;
 
 
