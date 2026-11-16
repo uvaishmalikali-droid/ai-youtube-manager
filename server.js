@@ -1035,6 +1035,85 @@ async function publishDueVideos() {
 // GEMINI AI SCRIPT GENERATION
 // =====================================
 
+// =====================================
+// GEMINI AI SCRIPT GENERATION
+// RETRY + BACKUP MODEL
+// =====================================
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function generateWithGemini(model, prompt, apiKey) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body: JSON.stringify({
+            contents: [{
+              role: "user",
+              parts: [{ text: prompt }]
+            }],
+            generationConfig: {
+              temperature: 0.8,
+              maxOutputTokens: 1500
+            }
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const error = new Error(
+          data.error?.message || "Gemini API error"
+        );
+
+        error.status = response.status;
+        throw error;
+      }
+
+      const script = data.candidates?.[0]?.content?.parts
+        ?.map(part => part.text || "")
+        .join("")
+        .trim();
+
+      if (!script) {
+        throw new Error("Gemini returned an empty script.");
+      }
+
+      return script;
+
+    } catch (error) {
+      lastError = error;
+
+      console.error(
+        `Gemini ${model}, attempt ${attempt}:`,
+        error.message
+      );
+
+      const retryable = !error.status ||
+        [408, 429, 500, 503, 504].includes(error.status);
+
+      if (!retryable) throw error;
+
+      if (attempt < 2) {
+        await wait(2000 * attempt);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 app.post("/api/generate-script", async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -1080,55 +1159,43 @@ Use the requested language.
 Do not add unnecessary explanations.
 `;
 
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: "user",
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.8,
-            maxOutputTokens: 1500
-          }
-        })
+    const models = [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite"
+    ];
+
+    let generatedScript = "";
+
+    for (const model of models) {
+      try {
+        console.log("Trying Gemini model:", model);
+
+        generatedScript = await generateWithGemini(
+          model,
+          prompt,
+          apiKey
+        );
+
+        console.log("Script generated successfully:", model);
+        break;
+
+      } catch (error) {
+        console.error(
+          "Gemini model failed:",
+          model,
+          error.message
+        );
       }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error(
-        "Gemini API error:",
-        data.error?.message || "Unknown error"
-      );
-
-      return res.status(502).json({
-        success: false,
-        message: "Gemini AI script generation failed. Check Render logs."
-      });
     }
-
-    const generatedScript =
-      data.candidates?.[0]?.content?.parts
-        ?.map(part => part.text || "")
-        .join("")
-        .trim();
 
     if (!generatedScript) {
       return res.status(502).json({
         success: false,
-        message: "Gemini did not return a script."
+        message: "Gemini models are temporarily unavailable. Please try again later."
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       script: generatedScript
     });
@@ -1136,14 +1203,12 @@ Do not add unnecessary explanations.
   } catch (error) {
     console.error("Gemini script error:", error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Server error while generating script."
     });
   }
 });
-
-
 // =====================================
 // UNKNOWN API ROUTE
 // =====================================
