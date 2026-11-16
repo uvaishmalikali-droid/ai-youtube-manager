@@ -44,7 +44,7 @@ app.use(cors({
     }
     return callback(new Error("Origin not allowed"));
   }
-}));
+}));app.use(express.json({ limit: "1mb" }));
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, callback) => {
