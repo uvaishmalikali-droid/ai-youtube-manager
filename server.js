@@ -951,7 +951,7 @@ app.post(
           }
         },
         media: {
-          body: Readable.from(req.file.buffer)
+          body: fs.createReadStream(req.file.path)
         }
       });
 
