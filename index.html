@@ -157,8 +157,8 @@ Loading channel list...
 <p class="small">
 ध्यान दें: उपलब्ध आवाज़ आपके फोन और Browser पर निर्भर करेगी।
 </p>
-</div>
-
+</div> 
+  
 <div class="card">
 <h3>🎬 Select Video</h3>
 
@@ -169,6 +169,28 @@ Loading channel list...
 <p id="videoStatus" class="small">No video selected</p>
 </div>
 
+<div class="card">
+<h3>📡 Backend Status</h3>
+<p id="backendStatus">Checking server...</p>
+<button onclick="checkBackend()">Check Backend</button>
+</div>
+
+<div class="card">
+<h3>📊 Dashboard</h3>
+<p>Welcome to AI YouTube Manager!</p>
+<p class="status">Dashboard Loaded Successfully</p>
+</div>
+
+</div>
+
+<script>
+const API_URL = "https://ai-youtube-manager-iw6j.onrender.com";
+
+function connect() {
+  document.getElementById("connection").textContent =
+    "Connecting to Google...";
+  window.location.href = API_URL + "/auth/google";
+} 
 <div class="card">
 <h3>📡 Backend Status</h3>
 <p id="backendStatus">Checking server...</p>
