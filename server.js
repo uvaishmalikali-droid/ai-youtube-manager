@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -964,14 +963,24 @@ app.post(
         videoUrl:
           "https://www.youtube.com/watch?v=" + result.data.id
       });
-
-        } catch (error) {
+          } catch (error) {
       console.error("YouTube upload error:", error.message);
 
       res.status(500).json({
         success: false,
         message: "Video upload failed. Check Render logs."
       });
+    } finally {
+      if (tempFilePath) {
+        try {
+          await fs.promises.unlink(tempFilePath);
+        } catch (cleanupError) {
+          console.error(
+            "Temporary video cleanup error:",
+            cleanupError.message
+          );
+        }
+      }
     }
   }
 );
