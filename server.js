@@ -849,6 +849,110 @@ app.post("/api/youtube/disconnect", async (req, res) => {
   }
 });
 
+// =====================================
+// YOUTUBE VIDEO UPLOAD API
+// =====================================
+
+app.post(
+  "/api/youtube/upload",
+  verifyUploadSecret,
+  upload.single("video"),
+  async (req, res) => {
+    try {
+      const channelId = activeChannelId;
+
+      if (!channelId) {
+        return res.status(400).json({
+          success: false,
+          message: "Please connect a YouTube channel first."
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "Please select a video file."
+        });
+      }
+
+      const title = String(req.body.title || "").trim();
+      const description = String(
+        req.body.description || ""
+      ).trim();
+
+      const privacyStatus = String(
+        req.body.privacyStatus || "private"
+      );
+
+      if (!title) {
+        return res.status(400).json({
+          success: false,
+          message: "Video title is required."
+        });
+      }
+
+      if (!["private", "unlisted", "public"].includes(privacyStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid privacy setting."
+        });
+      }
+
+      const channel = await refreshChannelToken(channelId);
+
+      const auth = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        REDIRECT_URI
+      );
+
+      auth.setCredentials({
+        access_token: channel.accessToken,
+        refresh_token: channel.refreshToken,
+        expiry_date: channel.expiresAt
+      });
+
+      const youtube = google.youtube({
+        version: "v3",
+        auth
+      });
+
+      const result = await youtube.videos.insert({
+        part: ["snippet", "status"],
+        requestBody: {
+          snippet: {
+            title: title.slice(0, 100),
+            description: description.slice(0, 5000),
+            categoryId: "22"
+          },
+          status: {
+            privacyStatus
+          }
+        },
+        media: {
+          body: Readable.from(req.file.buffer)
+        }
+      });
+
+      res.json({
+        success: true,
+        message: "Video uploaded successfully.",
+        videoId: result.data.id,
+        videoUrl:
+          "https://www.youtube.com/watch?v=" + result.data.id
+      });
+
+    } catch (error) {
+      console.error("YouTube upload error:", error.message);
+
+      res.status(500).json({
+        success: false,
+        message: "Video upload failed. Check Render logs."
+      });
+    }
+  }
+);
+
 
 // =====================================
 // GEMINI AI SCRIPT GENERATION
