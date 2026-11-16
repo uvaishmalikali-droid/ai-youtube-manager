@@ -177,21 +177,25 @@ async function initializeDatabase() {
     )
   `);
 
-  await pool.query(``await pool.query(`
-  CREATE TABLE IF NOT EXISTS scheduled_uploads (
-    id SERIAL PRIMARY KEY,
-    video_id TEXT NOT NULL,
-    channel_id TEXT NOT NULL,
-    publish_at TIMESTAMPTZ NOT NULL,
-    status TEXT DEFAULT 'pending',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-  )
-`);await pool.query(`
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS scheduled_uploads (
+      id SERIAL PRIMARY KEY,
+      video_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      publish_at TIMESTAMPTZ NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS youtube_settings (
       id INTEGER PRIMARY KEY,
       active_channel_id TEXT
     )
   `);
+
 
   await pool.query(`
     INSERT INTO youtube_settings (id, active_channel_id)
