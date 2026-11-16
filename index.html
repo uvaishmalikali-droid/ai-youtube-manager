@@ -37,6 +37,7 @@ button {
   font-size: 16px;
   cursor: pointer;
   margin: 5px 0;
+  width: 100%;
 }
 
 button:disabled { opacity: 0.5; }
@@ -67,6 +68,11 @@ textarea { min-height: 150px; }
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.voice-buttons button {
+  flex: 1;
+  min-width: 40%;
 }
 
 #voiceStatus {
@@ -107,10 +113,7 @@ Select Channel
 
 <button onclick="loadChannels()">Refresh Channel List</button>
 
-<p id="channelStatus" class="small">
-Loading channel list...
-</p>
-
+<p id="channelStatus" class="small">Loading channel list...</p>
 </div>
 
 <div class="card">
@@ -132,12 +135,12 @@ Loading channel list...
 अपनी Script को फोन में उपलब्ध हिंदी आवाज़ से सुनें।
 </p>
 
-<label for="voiceSelect">Voice Select करें:</label>
+<label>Voice Select करें:</label>
 <select id="voiceSelect">
 <option value="">Hindi voice loading...</option>
 </select>
 
-<label for="voiceRate">Voice Speed:</label>
+<label>Voice Speed:</label>
 <select id="voiceRate">
 <option value="0.85">Slow</option>
 <option value="0.95" selected>Normal</option>
@@ -153,20 +156,41 @@ Loading channel list...
 </div>
 
 <p id="voiceStatus">Voiceover तैयार है।</p>
+</div>
 
-<p class="small">
-ध्यान दें: उपलब्ध आवाज़ आपके फोन और Browser पर निर्भर करेगी।
-</p>
-</div> 
-  
 <div class="card">
-<h3>🎬 Select Video</h3>
+<h3>🎬 Select & Upload Video</h3>
 
+<label>Video Select करें:</label>
 <input type="file" id="video" accept="video/*">
 
 <video id="videoPreview" class="preview" controls style="display:none"></video>
 
 <p id="videoStatus" class="small">No video selected</p>
+
+<hr>
+
+<label>Video Title:</label>
+<input id="uploadTitle" maxlength="100" placeholder="Enter video title">
+
+<label>Video Description:</label>
+<textarea id="uploadDescription" placeholder="Enter video description"></textarea>
+
+<label>Privacy:</label>
+<select id="privacyStatus">
+<option value="private">Private</option>
+<option value="unlisted">Unlisted</option>
+<option value="public">Public</option>
+</select>
+
+<label>Upload Secret:</label>
+<input id="uploadSecret" type="password" placeholder="अपना Upload Secret यहाँ डालें">
+
+<button id="uploadBtn" onclick="uploadVideo()">
+📤 Upload to YouTube
+</button>
+
+<p id="uploadStatus" class="small"></p>
 </div>
 
 <div class="card">
@@ -186,37 +210,18 @@ Loading channel list...
 <script>
 const API_URL = "https://ai-youtube-manager-iw6j.onrender.com";
 
+// CONNECT YOUTUBE
 function connect() {
   document.getElementById("connection").textContent =
     "Connecting to Google...";
-  window.location.href = API_URL + "/auth/google";
-} 
-<div class="card">
-<h3>📡 Backend Status</h3>
-<p id="backendStatus">Checking server...</p>
-<button onclick="checkBackend()">Check Backend</button>
-</div>
 
-<div class="card">
-<h3>📊 Dashboard</h3>
-<p>Welcome to AI YouTube Manager!</p>
-<p class="status">Dashboard Loaded Successfully</p>
-</div>
-
-</div>
-
-<script>
-const API_URL = "https://ai-youtube-manager-iw6j.onrender.com";
-
-function connect() {
-  document.getElementById("connection").textContent =
-    "Connecting to Google...";
   window.location.href = API_URL + "/auth/google";
 }
 
 // YOUTUBE STATUS
 async function checkYouTubeStatus() {
   const connection = document.getElementById("connection");
+
   connection.textContent = "Checking YouTube connection...";
 
   try {
@@ -230,6 +235,7 @@ async function checkYouTubeStatus() {
       connection.textContent =
         "YouTube Connected Successfully! Channel: " +
         (data.channel || "Connected");
+
       connection.className = "status";
     } else {
       connection.textContent = "YouTube channel not connected";
@@ -241,7 +247,7 @@ async function checkYouTubeStatus() {
   }
 }
 
-// LOAD MULTIPLE CHANNELS
+// LOAD CHANNELS
 async function loadChannels() {
   const select = document.getElementById("channelSelect");
   const status = document.getElementById("channelStatus");
@@ -252,9 +258,7 @@ async function loadChannels() {
   try {
     const response = await fetch(API_URL + "/api/youtube/channels");
 
-    if (!response.ok) {
-      throw new Error("Channel API error");
-    }
+    if (!response.ok) throw new Error("Channel API error");
 
     const data = await response.json();
 
@@ -282,9 +286,7 @@ async function loadChannels() {
       option.textContent =
         channel.channel + (channel.active ? " (Active)" : "");
 
-      if (channel.active) {
-        option.selected = true;
-      }
+      if (channel.active) option.selected = true;
 
       select.appendChild(option);
     });
@@ -303,7 +305,7 @@ async function loadChannels() {
   }
 }
 
-// SELECT ACTIVE CHANNEL
+// SELECT CHANNEL
 async function selectChannel() {
   const select = document.getElementById("channelSelect");
   const button = document.getElementById("selectChannelBtn");
@@ -326,9 +328,7 @@ async function selectChannel() {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        channelId: channelId
-      })
+      body: JSON.stringify({ channelId })
     });
 
     const data = await response.json();
@@ -353,7 +353,7 @@ async function selectChannel() {
   }
 }
 
-// AI SCRIPT GENERATOR
+// GENERATE SCRIPT
 async function generateScript() {
   const topic = document.getElementById("topic").value.trim();
   const result = document.getElementById("script");
@@ -371,7 +371,7 @@ async function generateScript() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        topic: topic,
+        topic,
         language: "Hindi",
         style: "Engaging"
       })
@@ -402,6 +402,7 @@ function loadVoices() {
 
     document.getElementById("voiceStatus").textContent =
       "इस Browser में voice सुविधा उपलब्ध नहीं है।";
+
     return;
   }
 
@@ -418,13 +419,16 @@ function loadVoices() {
 
     document.getElementById("voiceStatus").textContent =
       "फोन में Hindi Text-to-Speech voice उपलब्ध नहीं है।";
+
     return;
   }
 
   hindiVoices.forEach((voice, index) => {
     const option = document.createElement("option");
+
     option.value = String(index);
     option.textContent = voice.name + " (" + voice.lang + ")";
+
     select.appendChild(option);
   });
 
@@ -454,9 +458,11 @@ function playVoice() {
     document.getElementById("voiceSelect").value
   );
 
-  const selectedVoice = availableVoices.filter(v =>
+  const hindiVoices = availableVoices.filter(v =>
     v.lang.toLowerCase().startsWith("hi")
-  )[voiceIndex];
+  );
+
+  const selectedVoice = hindiVoices[voiceIndex];
 
   let index = 0;
 
@@ -535,6 +541,7 @@ if ("speechSynthesis" in window) {
 // VIDEO PREVIEW
 document.getElementById("video").addEventListener("change", function() {
   const file = this.files[0];
+  const preview = document.getElementById("videoPreview");
 
   if (!file) return;
 
@@ -545,7 +552,6 @@ document.getElementById("video").addEventListener("change", function() {
   }
 
   const url = URL.createObjectURL(file);
-  const preview = document.getElementById("videoPreview");
 
   preview.src = url;
   preview.style.display = "block";
@@ -554,9 +560,84 @@ document.getElementById("video").addEventListener("change", function() {
     "Selected: " + file.name;
 });
 
+// UPLOAD VIDEO
+async function uploadVideo() {
+  const fileInput = document.getElementById("video");
+  const title = document.getElementById("uploadTitle").value.trim();
+  const description =
+    document.getElementById("uploadDescription").value.trim();
+  const privacyStatus =
+    document.getElementById("privacyStatus").value;
+  const secret =
+    document.getElementById("uploadSecret").value;
+
+  const button = document.getElementById("uploadBtn");
+  const status = document.getElementById("uploadStatus");
+
+  if (!fileInput.files.length) {
+    status.textContent = "पहले वीडियो Select करें।";
+    status.className = "error";
+    return;
+  }
+
+  if (!title) {
+    status.textContent = "Video Title लिखें।";
+    status.className = "error";
+    return;
+  }
+
+  if (!secret) {
+    status.textContent = "Upload Secret भरें।";
+    status.className = "error";
+    return;
+  }
+
+  const formData = new FormData();
+
+  formData.append("video", fileInput.files[0]);
+  formData.append("title", title);
+  formData.append("description", description);
+  formData.append("privacyStatus", privacyStatus);
+
+  button.disabled = true;
+  button.textContent = "Uploading...";
+  status.textContent = "वीडियो YouTube पर भेजा जा रहा है...";
+  status.className = "small";
+
+  try {
+    const response = await fetch(API_URL + "/api/youtube/upload", {
+      method: "POST",
+      headers: {
+        "x-upload-secret": secret
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Video upload failed.");
+    }
+
+    status.textContent =
+      "Upload Successful! " + data.videoUrl;
+
+    status.className = "status";
+
+  } catch (error) {
+    status.textContent = "Upload Error: " + error.message;
+    status.className = "error";
+
+  } finally {
+    button.disabled = false;
+    button.textContent = "📤 Upload to YouTube";
+  }
+}
+
 // BACKEND STATUS
 async function checkBackend() {
   const status = document.getElementById("backendStatus");
+
   status.textContent = "Checking...";
 
   try {
