@@ -879,8 +879,10 @@ app.post(
   verifyUploadSecret,
   upload.single("video"),
   async (req, res) => {
-    try {
-      const channelId = activeChannelId;
+  const tempFilePath = req.file?.path;
+
+  try {
+    const channelId = activeChannelId;
 
       if (!channelId) {
         return res.status(400).json({
