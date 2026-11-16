@@ -966,7 +966,70 @@ app.post(
     }
   }
 );
+// AUTO PUBLISH SCHEDULER
+async function publishDueVideos() {
+  try {
+    const dueVideos = await pool.query(`
+      SELECT id, video_id, channel_id
+      FROM scheduled_uploads
+      WHERE status = 'pending'
+      AND publish_at <= NOW()
+      ORDER BY publish_at ASC
+      LIMIT 5
+    `);
 
+    for (const job of dueVideos.rows) {
+      try {
+        const channel = await refreshChannelToken(job.channel_id);
+
+        const auth = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          REDIRECT_URI
+        );
+
+        auth.setCredentials({
+          access_token: channel.accessToken,
+          refresh_token: channel.refreshToken,
+          expiry_date: channel.expiresAt
+        });
+
+        const youtube = google.youtube({
+          version: "v3",
+          auth
+        });
+
+        await youtube.videos.update({
+          part: ["status"],
+          requestBody: {
+            id: job.video_id,
+            status: {
+              privacyStatus: "public"
+            }
+          }
+        });
+
+        await pool.query(
+          `UPDATE scheduled_uploads
+           SET status = 'published'
+           WHERE id = $1`,
+          [job.id]
+        );
+
+        console.log("Scheduled video published:", job.video_id);
+
+      } catch (error) {
+        console.error(
+          "Scheduled publish error:",
+          job.video_id,
+          error.message
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Scheduler error:", error.message);
+  }
+}
 
 // =====================================
 // GEMINI AI SCRIPT GENERATION
