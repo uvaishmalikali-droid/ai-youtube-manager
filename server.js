@@ -1132,6 +1132,105 @@ async function generateWithGemini(model, prompt, apiKey) {
   throw lastError;
 }
 
+// =====================================
+// GEMINI AI AUTO THUMBNAIL GENERATOR
+// =====================================
+
+app.post("/api/generate-thumbnail", async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        message: "Gemini API key is missing."
+      });
+    }
+
+    const { topic, language } = req.body || {};
+
+    if (typeof topic !== "string" || !topic.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a video topic."
+      });
+    }
+
+    const prompt = `
+Create a professional, eye-catching YouTube thumbnail.
+Video topic: ${topic.trim().slice(0, 300)}
+Language for text: ${String(language || "Hindi").slice(0, 30)}
+
+Use cinematic lighting, vibrant colors, clear subject,
+high contrast and attractive composition.
+Add short, readable title text in the requested language.
+Make it suitable for a YouTube video.
+Aspect ratio must be 16:9.
+Generate an actual image, not a description.
+`;
+
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+            responseFormat: {
+              image: {
+                aspectRatio: "16:9",
+                imageSize: "1K"
+              }
+            }
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Thumbnail API error:", data.error?.message);
+      return res.status(502).json({
+        success: false,
+        message: "Gemini thumbnail generation failed."
+      });
+    }
+
+    const imagePart = data.candidates
+      ?.flatMap(candidate => candidate.content?.parts || [])
+      .find(part => part.inlineData?.data);
+
+    if (!imagePart) {
+      return res.status(502).json({
+        success: false,
+        message: "Gemini did not return an image."
+      });
+    }
+
+    res.json({
+      success: true,
+      mimeType: imagePart.inlineData.mimeType,
+      imageBase64: imagePart.inlineData.data
+    });
+
+  } catch (error) {
+    console.error("Thumbnail error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Thumbnail generation server error."
+    });
+  }
+});
+
 app.post("/api/generate-script", async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
