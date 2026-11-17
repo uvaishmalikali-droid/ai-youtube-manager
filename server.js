@@ -686,7 +686,7 @@ app.get("/auth/google/callback", async (req, res) => {
     };
 
     await saveChannel(connection);
-
+    await selectChannel(connection.channelId);
     const safeChannel = String(connection.channel)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
