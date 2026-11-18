@@ -1138,18 +1138,19 @@ async function generateWithGemini(model, prompt, apiKey) {
 
 app.post("/api/generate-thumbnail", async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const token = process.env.CLOUDFLARE_API_TOKEN;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
 
-    if (!apiKey) {
+    if (!token || !accountId) {
       return res.status(500).json({
         success: false,
-        message: "Gemini API key is missing."
+        message: "Cloudflare credentials missing."
       });
     }
 
     const { topic, language } = req.body || {};
 
-    if (typeof topic !== "string" || !topic.trim()) {
+    if (!topic || typeof topic !== "string") {
       return res.status(400).json({
         success: false,
         message: "Please enter a video topic."
@@ -1157,68 +1158,41 @@ app.post("/api/generate-thumbnail", async (req, res) => {
     }
 
     const prompt = `
-Create a professional, eye-catching YouTube thumbnail.
-Video topic: ${topic.trim().slice(0, 300)}
-Language for text: ${String(language || "Hindi").slice(0, 30)}
-
-Use cinematic lighting, vibrant colors, clear subject,
-high contrast and attractive composition.
-Add short, readable title text in the requested language.
-Make it suitable for a YouTube video.
-Aspect ratio must be 16:9.
-Generate an actual image, not a description.
+Create a professional YouTube thumbnail.
+Topic: ${topic.trim().slice(0, 300)}
+Language: ${String(language || "Hindi").slice(0, 30)}
+Cinematic lighting, vibrant colors, beautiful composition,
+clear subject, attractive design, 16:9 aspect ratio.
 `;
 
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent",
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            responseModalities: ["TEXT", "IMAGE"],
-            responseFormat: {
-              image: {
-                aspectRatio: "16:9",
-                imageSize: "1K"
-              }
-            }
-          }
+          prompt: prompt
         })
       }
     );
 
     const data = await response.json();
 
-    if (!response.ok) {
-      console.error("Thumbnail API error:", data.error?.message);
+    if (!response.ok || !data.success || !data.result?.image) {
+      console.error("Cloudflare error:", data.errors);
       return res.status(502).json({
         success: false,
-        message: "Gemini thumbnail generation failed."
-      });
-    }
-
-    const imagePart = data.candidates
-      ?.flatMap(candidate => candidate.content?.parts || [])
-      .find(part => part.inlineData?.data);
-
-    if (!imagePart) {
-      return res.status(502).json({
-        success: false,
-        message: "Gemini did not return an image."
+        message: "Cloudflare thumbnail generation failed."
       });
     }
 
     res.json({
       success: true,
-      mimeType: imagePart.inlineData.mimeType,
-      imageBase64: imagePart.inlineData.data
+      mimeType: "image/png",
+      imageBase64: data.result.image
     });
 
   } catch (error) {
