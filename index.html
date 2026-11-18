@@ -79,6 +79,13 @@ textarea { min-height: 150px; }
   color: #55dd88;
   font-size: 14px;
 }
+
+#thumbnailPreview {
+  width: 100%;
+  margin-top: 12px;
+  border-radius: 10px;
+  display: none;
+}
 </style>
 </head>
 
@@ -127,19 +134,43 @@ Select Channel
 
 <p class="small">AI Video Script Generator</p>
 </div>
- 
+
+<!-- NEW CLOUDFLARE AI THUMBNAIL GENERATOR -->
+
 <div class="card">
 <h3>🎨 Free AI Thumbnail Generator</h3>
 
-<input id="thumbnailText" placeholder="Thumbnail पर लिखने वाला टेक्स्ट">
+<p class="small">
+अपना Video Topic लिखें। AI अपने आप Thumbnail बनाएगा।
+</p>
 
-<input id="thumbnailImage" type="file" accept="image/*">
+<input
+id="thumbnailTopic"
+placeholder="Thumbnail का Topic लिखें"
+>
 
-<button onclick="generateThumbnail()">Create Thumbnail</button>
+<select id="thumbnailLanguage">
+<option value="Hindi">Hindi</option>
+<option value="English">English</option>
+<option value="Urdu">Urdu</option>
+</select>
 
-<canvas id="thumbnailCanvas" width="1280" height="720" style="width:100%;border-radius:10px;"></canvas>
+<button id="thumbnailBtn" onclick="generateThumbnail()">
+✨ Generate AI Thumbnail
+</button>
 
-<button onclick="downloadThumbnail()">Download Thumbnail</button>
+<p id="thumbnailStatus" class="small">
+AI Thumbnail तैयार है।
+</p>
+
+<img id="thumbnailPreview" alt="Generated AI Thumbnail">
+
+<button id="downloadThumbnailBtn"
+onclick="downloadThumbnail()"
+style="display:none">
+⬇ Download Thumbnail
+</button>
+
 </div>
 
 <div class="card">
@@ -404,76 +435,89 @@ async function generateScript() {
   }
 }
 
-let thumbnailImageObject = null;
+// CLOUDFLARE AI THUMBNAIL GENERATOR
+async function generateThumbnail() {
+  const topic = document.getElementById("thumbnailTopic").value.trim();
+  const language = document.getElementById("thumbnailLanguage").value;
 
-document.getElementById("thumbnailImage").addEventListener("change", function(event) {
-  thumbnailImageObject = event.target.files[0];
+  const button = document.getElementById("thumbnailBtn");
+  const status = document.getElementById("thumbnailStatus");
+  const preview = document.getElementById("thumbnailPreview");
+  const downloadButton = document.getElementById("downloadThumbnailBtn");
 
-  if (!thumbnailImageObject) return;
-
-  const img = new Image();
-
-  img.onload = function() {
-    const canvas = document.getElementById("thumbnailCanvas");
-    const ctx = canvas.getContext("2d");
-
-    ctx.drawImage(img, 0, 0, 1280, 720);
-
-    URL.revokeObjectURL(img.src);
-  };
-
-  img.src = URL.createObjectURL(thumbnailImageObject);
-});
-
-function generateThumbnail() {
-  const canvas = document.getElementById("thumbnailCanvas");
-  const ctx = canvas.getContext("2d");
-  const text = document.getElementById("thumbnailText").value.trim();
-
-  if (!thumbnailImageObject) {
-    alert("Please select a background image first.");
+  if (!topic) {
+    status.textContent = "पहले Thumbnail का Topic लिखें।";
+    status.className = "error";
     return;
   }
 
-  const img = new Image();
+  button.disabled = true;
+  button.textContent = "AI Thumbnail बना रहा है...";
+  status.textContent = "Cloudflare Workers AI से Image बनाई जा रही है...";
+  status.className = "small";
 
-  img.onload = function() {
-    ctx.drawImage(img, 0, 0, 1280, 720);
+  preview.style.display = "none";
+  downloadButton.style.display = "none";
 
-    ctx.fillStyle = "rgba(0,0,0,0.65)";
-    ctx.fillRect(0, 520, 1280, 200);
+  try {
+    const response = await fetch(API_URL + "/api/generate-thumbnail", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        topic: topic,
+        language: language
+      })
+    });
 
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 64px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    const data = await response.json();
 
-    ctx.shadowColor = "#000000";
-    ctx.shadowBlur = 8;
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Thumbnail generation failed.");
+    }
 
-    ctx.fillText(text || "NEW VIDEO", 640, 620, 1160);
+    if (!data.imageBase64) {
+      throw new Error("AI image was not received.");
+    }
 
-    ctx.shadowBlur = 0;
-  };
+    const imageURL =
+      "data:" + (data.mimeType || "image/png") +
+      ";base64," + data.imageBase64;
 
-  img.src = URL.createObjectURL(thumbnailImageObject);
+    preview.src = imageURL;
+    preview.style.display = "block";
+
+    downloadButton.style.display = "block";
+
+    status.textContent = "AI Thumbnail Successfully Generated!";
+    status.className = "status";
+
+  } catch (error) {
+    status.textContent = "Error: " + error.message;
+    status.className = "error";
+
+  } finally {
+    button.disabled = false;
+    button.textContent = "✨ Generate AI Thumbnail";
+  }
 }
 
+// DOWNLOAD THUMBNAIL
 function downloadThumbnail() {
-  const canvas = document.getElementById("thumbnailCanvas");
+  const preview = document.getElementById("thumbnailPreview");
 
-  canvas.toBlob(function(blob) {
-    if (!blob) return;
+  if (!preview.src || preview.style.display === "none") {
+    alert("पहले Thumbnail Generate करें।");
+    return;
+  }
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+  const link = document.createElement("a");
 
-    link.href = url;
-    link.download = "youtube-thumbnail.jpg";
-    link.click();
+  link.href = preview.src;
+  link.download = "AI-YouTube-Thumbnail.png";
 
-    URL.revokeObjectURL(url);
-  }, "image/jpeg", 0.92);
+  link.click();
 }
 
 // VOICEOVER
