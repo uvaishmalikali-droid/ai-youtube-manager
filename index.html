@@ -131,6 +131,20 @@ Select Channel
 </div>
   
 <div class="card">
+<h3>🎨 Free AI Thumbnail Generator</h3>
+
+<input id="thumbnailText" placeholder="Thumbnail पर लिखने वाला टेक्स्ट">
+
+<input id="thumbnailImage" type="file" accept="image/*">
+
+<button onclick="generateThumbnail()">Create Thumbnail</button>
+
+<canvas id="thumbnailCanvas" width="1280" height="720" style="width:100%;border-radius:10px;"></canvas>
+
+<button onclick="downloadThumbnail()">Download Thumbnail</button>
+</div>
+
+<div class="card">
 <h3>🎙️ Hindi AI Voiceover</h3>
 
 <p class="small">
