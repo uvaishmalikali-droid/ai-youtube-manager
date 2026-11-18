@@ -404,6 +404,78 @@ async function generateScript() {
   }
 }
 
+let thumbnailImageObject = null;
+
+document.getElementById("thumbnailImage").addEventListener("change", function(event) {
+  thumbnailImageObject = event.target.files[0];
+
+  if (!thumbnailImageObject) return;
+
+  const img = new Image();
+
+  img.onload = function() {
+    const canvas = document.getElementById("thumbnailCanvas");
+    const ctx = canvas.getContext("2d");
+
+    ctx.drawImage(img, 0, 0, 1280, 720);
+
+    URL.revokeObjectURL(img.src);
+  };
+
+  img.src = URL.createObjectURL(thumbnailImageObject);
+});
+
+function generateThumbnail() {
+  const canvas = document.getElementById("thumbnailCanvas");
+  const ctx = canvas.getContext("2d");
+  const text = document.getElementById("thumbnailText").value.trim();
+
+  if (!thumbnailImageObject) {
+    alert("Please select a background image first.");
+    return;
+  }
+
+  const img = new Image();
+
+  img.onload = function() {
+    ctx.drawImage(img, 0, 0, 1280, 720);
+
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 520, 1280, 200);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 64px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.shadowColor = "#000000";
+    ctx.shadowBlur = 8;
+
+    ctx.fillText(text || "NEW VIDEO", 640, 620, 1160);
+
+    ctx.shadowBlur = 0;
+  };
+
+  img.src = URL.createObjectURL(thumbnailImageObject);
+}
+
+function downloadThumbnail() {
+  const canvas = document.getElementById("thumbnailCanvas");
+
+  canvas.toBlob(function(blob) {
+    if (!blob) return;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "youtube-thumbnail.jpg";
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }, "image/jpeg", 0.92);
+}
+
 // VOICEOVER
 let availableVoices = [];
 let activeUtterance = null;
