@@ -1298,7 +1298,8 @@ Do not add unnecessary explanations.
       success: false,
       message: "Server error while generating script."
     });
-
+   }
+ });
 
  // =====================================
  // HINDI AI VOICEOVER - MP3 GENERATOR
