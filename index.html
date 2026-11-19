@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="hi">
 <head>
@@ -63,27 +64,16 @@ textarea { min-height: 150px; }
 .status { color: #55dd88; }
 .error { color: #ff7777; }
 
-.voice-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.voice-buttons button {
-  flex: 1;
-  min-width: 40%;
-}
-
-#voiceStatus {
-  color: #55dd88;
-  font-size: 14px;
-}
-
 #thumbnailPreview {
   width: 100%;
   margin-top: 12px;
   border-radius: 10px;
   display: none;
+}
+
+#voiceAudio {
+  width: 100%;
+  margin-top: 12px;
 }
 </style>
 </head>
@@ -134,8 +124,6 @@ Select Channel
 <p class="small">AI Video Script Generator</p>
 </div>
 
-<!-- NEW CLOUDFLARE AI THUMBNAIL GENERATOR -->
-
 <div class="card">
 <h3>🎨 Free AI Thumbnail Generator</h3>
 
@@ -143,10 +131,7 @@ Select Channel
 अपना Video Topic लिखें। AI अपने आप Thumbnail बनाएगा।
 </p>
 
-<input
-id="thumbnailTopic"
-placeholder="Thumbnail का Topic लिखें"
->
+<input id="thumbnailTopic" placeholder="Thumbnail का Topic लिखें">
 
 <select id="thumbnailLanguage">
 <option value="Hindi">Hindi</option>
@@ -169,37 +154,38 @@ onclick="downloadThumbnail()"
 style="display:none">
 ⬇ Download Thumbnail
 </button>
-
 </div>
+
+<!-- INDIA API HINDI MP3 VOICEOVER -->
 
 <div class="card">
-<h3>🎙️ Hindi AI Voiceover</h3>
+<h3>🎙️ HINDI AI VOICEOVER - MP3 GENERATOR</h3>
 
 <p class="small">
-अपनी Script को फोन में उपलब्ध हिंदी आवाज़ से सुनें।
+अपनी Hindi Script से AI आवाज़ में MP3 बनाएँ।
 </p>
 
-<label>Voice Select करें:</label>
-<select id="voiceSelect">
-<option value="">Hindi voice loading...</option>
-</select>
+<button id="generateVoiceBtn" onclick="generateVoiceover()">
+🎙️ Generate Hindi MP3
+</button>
 
-<label>Voice Speed:</label>
-<select id="voiceRate">
-<option value="0.85">Slow</option>
-<option value="0.95" selected>Normal</option>
-<option value="1">Natural</option>
-<option value="1.1">Fast</option>
-</select>
+<p id="voiceStatus" class="small">
+MP3 बनाने के लिए तैयार।
+</p>
 
-<div class="voice-buttons">
-<button onclick="playVoice()">▶ Play Voice</button>
-<button onclick="pauseVoice()">⏸ Pause</button>
-<button onclick="resumeVoice()">▶ Resume</button>
-<button onclick="stopVoice()">⏹ Stop</button>
-</div>
+<audio id="voiceAudio" controls
+style="width:100%; display:none; margin-top:12px;">
+</audio>
 
-<p id="voiceStatus">Voiceover तैयार है।</p>
+<button id="downloadVoiceBtn"
+onclick="downloadVoiceover()"
+style="display:none">
+⬇ Download MP3
+</button>
+
+<p class="small">
+Voice: Hindi Rohan (India API)
+</p>
 </div>
 
 <div class="card">
@@ -407,7 +393,6 @@ async function generateScript() {
     return;
   }
 
-  stopVoice();
   result.value = "AI is generating your script...";
 
   try {
@@ -519,152 +504,111 @@ function downloadThumbnail() {
   link.click();
 }
 
-// VOICEOVER
-let availableVoices = [];
-let activeUtterance = null;
+// INDIA API HINDI MP3 VOICEOVER
+let generatedVoiceBlob = null;
+let generatedVoiceUrl = null;
 
-function loadVoices() {
-  const select = document.getElementById("voiceSelect");
-
-  if (!("speechSynthesis" in window)) {
-    select.innerHTML = '<option>Voice not supported</option>';
-
-    document.getElementById("voiceStatus").textContent =
-      "इस Browser में voice सुविधा उपलब्ध नहीं है।";
-
-    return;
-  }
-
-  availableVoices = window.speechSynthesis.getVoices();
-
-  const hindiVoices = availableVoices.filter(voice =>
-    voice.lang.toLowerCase().startsWith("hi")
-  );
-
-  select.innerHTML = "";
-
-  if (hindiVoices.length === 0) {
-    select.innerHTML = '<option value="">Hindi voice नहीं मिली</option>';
-
-    document.getElementById("voiceStatus").textContent =
-      "फोन में Hindi Text-to-Speech voice उपलब्ध नहीं है।";
-
-    return;
-  }
-
-  hindiVoices.forEach((voice, index) => {
-    const option = document.createElement("option");
-
-    option.value = String(index);
-    option.textContent = voice.name + " (" + voice.lang + ")";
-
-    select.appendChild(option);
-  });
-
-  document.getElementById("voiceStatus").textContent =
-    "Hindi voice उपलब्ध है।";
-}
-
-function playVoice() {
-  const text = document.getElementById("script").value.trim();
+async function generateVoiceover() {
+  const script = document.getElementById("script").value.trim();
+  const button = document.getElementById("generateVoiceBtn");
   const status = document.getElementById("voiceStatus");
+  const audio = document.getElementById("voiceAudio");
+  const downloadButton = document.getElementById("downloadVoiceBtn");
 
-  if (!text || text === "AI is generating your script...") {
-    alert("पहले Script Generate करें या Script लिखें।");
+  if (!script || script === "AI is generating your script...") {
+    status.textContent = "पहले अपनी Hindi Script लिखें या Generate करें।";
+    status.className = "error";
     return;
   }
 
-  if (!("speechSynthesis" in window)) {
-    status.textContent = "आपका Browser voice support नहीं करता।";
+  if (script.length > 3000) {
+    status.textContent = "Script 3000 अक्षरों से छोटी रखें।";
+    status.className = "error";
     return;
   }
 
-  stopVoice();
+  button.disabled = true;
+  button.textContent = "MP3 बनाया जा रहा है...";
+  status.textContent = "India API से Hindi Voice बनाई जा रही है...";
+  status.className = "small";
 
-  const chunks = text.match(/[\s\S]{1,180}([।.!?\n]|$)/g) || [text];
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.style.display = "none";
+  downloadButton.style.display = "none";
 
-  const voiceIndex = Number(
-    document.getElementById("voiceSelect").value
-  );
+  if (generatedVoiceUrl) {
+    URL.revokeObjectURL(generatedVoiceUrl);
+    generatedVoiceUrl = null;
+  }
 
-  const hindiVoices = availableVoices.filter(v =>
-    v.lang.toLowerCase().startsWith("hi")
-  );
+  generatedVoiceBlob = null;
 
-  const selectedVoice = hindiVoices[voiceIndex];
+  try {
+    const response = await fetch(API_URL + "/api/generate-voiceover", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ text: script })
+    });
 
-  let index = 0;
+    const data = await response.json();
 
-  function speakNext() {
-    if (index >= chunks.length) {
-      status.textContent = "Voiceover पूरा हो गया।";
-      activeUtterance = null;
-      return;
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Voiceover generation failed.");
     }
 
-    const utterance =
-      new SpeechSynthesisUtterance(chunks[index].trim());
+    if (!data.audioBase64) {
+      throw new Error("MP3 audio was not received.");
+    }
 
-    utterance.lang = "hi-IN";
-    utterance.rate =
-      Number(document.getElementById("voiceRate").value);
+    const binary = atob(data.audioBase64);
+    const bytes = new Uint8Array(binary.length);
 
-    utterance.pitch = 0.75;
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
 
-    if (selectedVoice) utterance.voice = selectedVoice;
+    generatedVoiceBlob = new Blob([bytes], {
+      type: data.mimeType || "audio/mpeg"
+    });
 
-    utterance.onend = () => {
-      index++;
-      speakNext();
-    };
+    generatedVoiceUrl = URL.createObjectURL(generatedVoiceBlob);
 
-    utterance.onerror = (event) => {
-      status.textContent = "Voice error: " + event.error;
-      activeUtterance = null;
-    };
+    audio.src = generatedVoiceUrl;
+    audio.style.display = "block";
 
-    activeUtterance = utterance;
-    window.speechSynthesis.speak(utterance);
+    downloadButton.style.display = "block";
 
-    status.textContent = "Voiceover चल रहा है...";
-  }
+    status.textContent = "Hindi MP3 सफलतापूर्वक तैयार है!";
+    status.className = "status";
 
-  speakNext();
-}
+  } catch (error) {
+    status.textContent = "Voiceover Error: " + error.message;
+    status.className = "error";
 
-function pauseVoice() {
-  if (window.speechSynthesis.speaking) {
-    window.speechSynthesis.pause();
-
-    document.getElementById("voiceStatus").textContent =
-      "Voice paused.";
+  } finally {
+    button.disabled = false;
+    button.textContent = "🎙️ Generate Hindi MP3";
   }
 }
 
-function resumeVoice() {
-  if (window.speechSynthesis.paused) {
-    window.speechSynthesis.resume();
-
-    document.getElementById("voiceStatus").textContent =
-      "Voice resumed.";
-  }
-}
-
-function stopVoice() {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
+// DOWNLOAD MP3
+function downloadVoiceover() {
+  if (!generatedVoiceBlob || !generatedVoiceUrl) {
+    alert("पहले Hindi MP3 Generate करें।");
+    return;
   }
 
-  activeUtterance = null;
+  const link = document.createElement("a");
 
-  const status = document.getElementById("voiceStatus");
+  link.href = generatedVoiceUrl;
+  link.download = "Hindi-AI-Voiceover.mp3";
 
-  if (status) status.textContent = "Voice stopped.";
-}
-
-if ("speechSynthesis" in window) {
-  loadVoices();
-  window.speechSynthesis.onvoiceschanged = loadVoices;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 // VIDEO PREVIEW
