@@ -11,6 +11,8 @@ const multer = require("multer");
 const fs = require("fs");
 const os = require("os");
 const { Readable } = require("stream");
+const ffmpegPath = require("ffmpeg-static");
+const { spawn } = require("child_process");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
