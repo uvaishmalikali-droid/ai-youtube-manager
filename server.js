@@ -130,9 +130,7 @@ function editorUploadGuard(req, res, next) {
 app.post(
   "/api/editor/merge",
   editorUpload.fields([
-    { name: "video", maxCount: 1 },
-    { name: "audio", maxCount: 1 }
-  ]),
+    
   async (req, res) => {
     const videoPath = req.files?.video?.[0]?.path;
     const audioPath = req.files?.audio?.[0]?.path;
