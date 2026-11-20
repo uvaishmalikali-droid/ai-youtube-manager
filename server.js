@@ -98,7 +98,7 @@ const editorUpload = multer({
     callback(null, true);
   }
 });
-
+ 
 // =====================================
 // AI SMART EDITOR - VIDEO + MP3 MERGER
 // =====================================
@@ -130,12 +130,12 @@ function editorUploadGuard(req, res, next) {
 
 app.post(
   "/api/editor/merge",
-  editorUpload.fields([
-    
+  editorUploadGuard,
   async (req, res) => {
     const videoPath = req.files?.video?.[0]?.path;
     const audioPath = req.files?.audio?.[0]?.path;
-    const outputPath = os.tmpdir() + "/" + crypto.randomUUID() + ".mp4";
+    const outputPath =
+      os.tmpdir() + "/" + crypto.randomUUID() + ".mp4";
 
     const cleanup = async () => {
       for (const file of [videoPath, audioPath, outputPath]) {
@@ -144,12 +144,14 @@ app.post(
             await fs.promises.unlink(file);
           } catch {}
         }
-     }
+      }
+
       editorBusy = false;
     };
 
     if (!videoPath || !audioPath) {
       await cleanup();
+
       return res.status(400).json({
         success: false,
         message: "Please upload both video and MP3 audio."
@@ -158,6 +160,7 @@ app.post(
 
     if (!ffmpegPath) {
       await cleanup();
+
       return res.status(500).json({
         success: false,
         message: "FFmpeg is not available."
@@ -185,6 +188,7 @@ app.post(
 
     ffmpeg.on("error", async () => {
       await cleanup();
+
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
@@ -195,7 +199,11 @@ app.post(
 
     ffmpeg.on("close", async code => {
       if (code !== 0) {
-        console.error("FFmpeg error:", errorOutput.slice(-2000));
+        console.error(
+          "FFmpeg error:",
+          errorOutput.slice(-2000)
+        );
+
         await cleanup();
 
         if (!res.headersSent) {
@@ -204,33 +212,20 @@ app.post(
             message: "Video editing failed."
           });
         }
+
         return;
       }
 
-      res.download(outputPath, "AI-Edited-Video.mp4", async () => {
-        await cleanup();
-      });
+      res.download(
+        outputPath,
+        "AI-Edited-Video.mp4",
+        async () => {
+          await cleanup();
+        }
+      );
     });
   }
 );
-
-function verifyUploadSecret(req, res, next) {
-  const secret = req.headers["x-upload-secret"];
-
-  if (
-    !process.env.UPLOAD_BOT_SECRET ||
-    secret !== process.env.UPLOAD_BOT_SECRET
-  ) {
-    return res.status(401).json({
-      success: false,
-      message: "Unauthorized upload request."
-    });
-  }
-
-  next();
-}
-let activeChannelId = null;
-
 
 // =====================================
 // TOKEN ENCRYPTION
