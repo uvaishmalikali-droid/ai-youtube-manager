@@ -48,6 +48,37 @@ app.use(cors({
   }
 }));app.use(express.json({ limit: "1mb" }));
 const upload = multer({
+ 
+// =====================================
+// AI SMART EDITOR VIDEO + AUDIO UPLOAD
+// =====================================
+
+const editorUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, callback) => {
+      callback(null, os.tmpdir());
+    },
+    filename: (req, file, callback) => {
+      callback(null, crypto.randomUUID() + ".media");
+    }
+  }),
+  limits: {
+    fileSize: 50 * 1024 * 1024
+  },
+  fileFilter: (req, file, callback) => {
+    if (
+      !file.mimetype.startsWith("video/") &&
+      !file.mimetype.startsWith("audio/")
+    ) {
+      return callback(
+        new Error("Only video and audio files are allowed.")
+      );
+    }
+
+    callback(null, true);
+  }
+});
+
   storage: multer.diskStorage({
     destination: (req, file, callback) => {
       callback(null, os.tmpdir());
