@@ -13,6 +13,7 @@ const os = require("os");
 const { Readable } = require("stream");
 const ffmpegPath = require("ffmpeg-static");
 const { spawn } = require("child_process");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -47,11 +48,13 @@ app.use(cors({
     return callback(new Error("Origin not allowed"));
   }
 }));
+
 app.use(express.json({ limit: "1mb" }));
 
- 
+let activeChannelId = null;
+
 // =====================================
-// AI SMART EDITOR VIDEO + AUDIO UPLOAD
+// FILE UPLOAD SETTINGS
 // =====================================
 
 const editorUpload = multer({
@@ -79,7 +82,8 @@ const editorUpload = multer({
     callback(null, true);
   }
 });
-  const upload = multer({
+
+const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, callback) => {
       callback(null, os.tmpdir());
@@ -93,14 +97,57 @@ const editorUpload = multer({
   },
   fileFilter: (req, file, callback) => {
     if (!file.mimetype.startsWith("video/")) {
-      return callback(new Error("Only video files are allowed."));
+      return callback(
+        new Error("Only video files are allowed.")
+      );
     }
+
     callback(null, true);
   }
 });
- 
+
 // =====================================
-// AI SMART EDITOR - VIDEO + MP3 MERGER
+// UPLOAD SECRET SECURITY
+// =====================================
+
+function verifyUploadSecret(req, res, next) {
+  const secret = process.env.UPLOAD_BOT_SECRET;
+  const supplied = req.headers["x-upload-secret"];
+
+  if (!secret) {
+    return res.status(503).json({
+      success: false,
+      message: "Upload security is not configured."
+    });
+  }
+
+  if (
+    typeof supplied !== "string" ||
+    supplied.length !== secret.length
+  ) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized upload request."
+    });
+  }
+
+  const valid = crypto.timingSafeEqual(
+    Buffer.from(supplied),
+    Buffer.from(secret)
+  );
+
+  if (!valid) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized upload request."
+    });
+  }
+
+  next();
+}
+
+// =====================================
+// AI SMART EDITOR - VIDEO + AUDIO
 // =====================================
 
 let editorBusy = false;
@@ -118,7 +165,7 @@ function editorUploadGuard(req, res, next) {
   editorUpload.fields([
     { name: "video", maxCount: 1 },
     { name: "audio", maxCount: 1 }
-  ])(req, res, (error) => {
+  ])(req, res, error => {
     if (error) {
       editorBusy = false;
       return next(error);
@@ -134,11 +181,21 @@ app.post(
   async (req, res) => {
     const videoPath = req.files?.video?.[0]?.path;
     const audioPath = req.files?.audio?.[0]?.path;
+
     const outputPath =
       os.tmpdir() + "/" + crypto.randomUUID() + ".mp4";
 
+    let cleaned = false;
+
     const cleanup = async () => {
-      for (const file of [videoPath, audioPath, outputPath]) {
+      if (cleaned) return;
+      cleaned = true;
+
+      for (const file of [
+        videoPath,
+        audioPath,
+        outputPath
+      ]) {
         if (file) {
           try {
             await fs.promises.unlink(file);
@@ -176,6 +233,7 @@ app.post(
       "-c:v", "copy",
       "-c:a", "aac",
       "-b:a", "128k",
+      "-shortest",
       "-movflags", "+faststart",
       outputPath
     ]);
@@ -186,7 +244,9 @@ app.post(
       errorOutput += data.toString();
     });
 
-    ffmpeg.on("error", async () => {
+    ffmpeg.on("error", async error => {
+      console.error("FFmpeg start error:", error.message);
+
       await cleanup();
 
       if (!res.headersSent) {
@@ -219,14 +279,18 @@ app.post(
       res.download(
         outputPath,
         "AI-Edited-Video.mp4",
-        async () => {
+        async error => {
+          if (error) {
+            console.error("Download error:", error.message);
+          }
+
           await cleanup();
         }
       );
     });
   }
 );
-let activeChannelId = null;
+
 // =====================================
 // TOKEN ENCRYPTION
 // =====================================
@@ -247,6 +311,7 @@ function encryptToken(value) {
   if (!value) return null;
 
   const iv = crypto.randomBytes(12);
+
   const cipher = crypto.createCipheriv(
     "aes-256-gcm",
     getEncryptionKey(),
@@ -265,10 +330,24 @@ function encryptToken(value) {
   ].join(".");
 }
 
+function isEncryptedToken(value) {
+  if (typeof value !== "string") return false;
+
+  const parts = value.split(".");
+
+  if (parts.length !== 3) return false;
+
+  return parts.every(part =>
+    part.length > 0 &&
+    /^[0-9a-f]+$/i.test(part)
+  );
+}
+
 function decryptToken(value) {
   if (!value) return null;
 
   const parts = value.split(".");
+
   if (parts.length !== 3) {
     throw new Error("Stored token format is invalid.");
   }
@@ -291,13 +370,11 @@ function decryptToken(value) {
   return decrypted.toString("utf8");
 }
 
-
 // =====================================
 // DATABASE AND SAFE MIGRATION
 // =====================================
 
 async function initializeDatabase() {
-  // Keep the old table so its existing data is not deleted.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS youtube_connection (
       id INTEGER PRIMARY KEY,
@@ -328,7 +405,6 @@ async function initializeDatabase() {
     )
   `);
 
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS scheduled_uploads (
       id SERIAL PRIMARY KEY,
@@ -347,14 +423,12 @@ async function initializeDatabase() {
     )
   `);
 
-
   await pool.query(`
     INSERT INTO youtube_settings (id, active_channel_id)
     VALUES (1, NULL)
     ON CONFLICT (id) DO NOTHING
   `);
 
-  // Migrate the previously connected channel.
   const old = await pool.query(`
     SELECT * FROM youtube_connection WHERE id = 1
   `);
@@ -363,6 +437,18 @@ async function initializeDatabase() {
     const row = old.rows[0];
 
     if (row.channel_id) {
+      const accessToken =
+        isEncryptedToken(row.access_token)
+          ? row.access_token
+          : encryptToken(row.access_token);
+
+      const refreshToken =
+        !row.refresh_token
+          ? null
+          : isEncryptedToken(row.refresh_token)
+            ? row.refresh_token
+            : encryptToken(row.refresh_token);
+
       await pool.query(
         `INSERT INTO youtube_connections
           (channel_id, access_token, refresh_token,
@@ -371,8 +457,8 @@ async function initializeDatabase() {
          ON CONFLICT (channel_id) DO NOTHING`,
         [
           row.channel_id,
-          row.access_token,
-          row.refresh_token,
+          accessToken,
+          refreshToken,
           row.expires_at,
           row.channel
         ]
@@ -380,7 +466,8 @@ async function initializeDatabase() {
 
       await pool.query(
         `UPDATE youtube_settings
-         SET active_channel_id = COALESCE(active_channel_id, $1)
+         SET active_channel_id =
+           COALESCE(active_channel_id, $1)
          WHERE id = 1`,
         [row.channel_id]
       );
@@ -397,7 +484,6 @@ async function initializeDatabase() {
 
   console.log("Multi-channel database is ready.");
 }
-
 
 // =====================================
 // CHANNEL DATABASE HELPERS
@@ -466,6 +552,7 @@ async function selectChannel(channelId) {
   );
 
   activeChannelId = channelId;
+
   return channel;
 }
 
@@ -508,8 +595,6 @@ async function deleteChannel(channelId) {
     activeChannelId = nextId;
   }
 }
-
-
 // =====================================
 // OAUTH HELPERS
 // =====================================
@@ -519,6 +604,7 @@ function readCookies(header = "") {
 
   header.split(";").filter(Boolean).forEach(item => {
     const separator = item.indexOf("=");
+
     if (separator === -1) return;
 
     const name = item.slice(0, separator).trim();
@@ -546,9 +632,12 @@ function isValidOAuthState(state, cookieState) {
     typeof state !== "string" ||
     typeof cookieState !== "string" ||
     state !== cookieState
-  ) return false;
+  ) {
+    return false;
+  }
 
   const parts = state.split(".");
+
   if (parts.length !== 2) return false;
 
   const [nonce, signature] = parts;
@@ -570,7 +659,6 @@ function oauthIsConfigured() {
     SESSION_SECRET
   );
 }
-
 
 // =====================================
 // TOKEN REFRESH
@@ -627,6 +715,7 @@ async function refreshChannelToken(channelId) {
   }
 
   channel.accessToken = data.access_token;
+
   channel.expiresAt =
     Date.now() + Number(data.expires_in || 3600) * 1000;
 
@@ -635,9 +724,9 @@ async function refreshChannelToken(channelId) {
   }
 
   await saveChannel(channel);
+
   return channel;
 }
-
 
 // =====================================
 // HOME AND HEALTH
@@ -668,7 +757,6 @@ app.get("/api/health", async (req, res) => {
     });
   }
 });
-
 
 // =====================================
 // START GOOGLE OAUTH
@@ -711,7 +799,6 @@ app.get("/auth/google", (req, res) => {
     params.toString()
   );
 });
-
 
 // =====================================
 // GOOGLE OAUTH CALLBACK
@@ -831,6 +918,7 @@ app.get("/auth/google/callback", async (req, res) => {
 
     await saveChannel(connection);
     await selectChannel(connection.channelId);
+
     const safeChannel = String(connection.channel)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -861,7 +949,6 @@ app.get("/auth/google/callback", async (req, res) => {
   }
 });
 
-
 // =====================================
 // LIST ALL CONNECTED CHANNELS
 // =====================================
@@ -885,7 +972,6 @@ app.get("/api/youtube/channels", async (req, res) => {
   }
 });
 
-
 // =====================================
 // ACTIVE CHANNEL STATUS
 // =====================================
@@ -907,6 +993,7 @@ app.get("/api/youtube/status", async (req, res) => {
       channel: channel.channel,
       channelId: channel.channelId
     });
+
   } catch (error) {
     res.json({
       connected: false,
@@ -916,7 +1003,6 @@ app.get("/api/youtube/status", async (req, res) => {
     });
   }
 });
-
 
 // =====================================
 // SELECT ACTIVE CHANNEL
@@ -943,6 +1029,7 @@ app.post("/api/youtube/select", async (req, res) => {
       channel: channel.channel,
       channelId: channel.channelId
     });
+
   } catch (error) {
     res.status(404).json({
       success: false,
@@ -950,7 +1037,6 @@ app.post("/api/youtube/select", async (req, res) => {
     });
   }
 });
-
 
 // =====================================
 // DISCONNECT ONE CHANNEL
@@ -1003,6 +1089,7 @@ app.post("/api/youtube/disconnect", async (req, res) => {
       channels: await getAllChannels(),
       activeChannelId
     });
+
   } catch (error) {
     console.error("Disconnect error:", error.message);
 
@@ -1012,7 +1099,6 @@ app.post("/api/youtube/disconnect", async (req, res) => {
     });
   }
 });
-
 // =====================================
 // YOUTUBE VIDEO UPLOAD API
 // =====================================
@@ -1022,10 +1108,10 @@ app.post(
   verifyUploadSecret,
   upload.single("video"),
   async (req, res) => {
-  const tempFilePath = req.file?.path;
+    const tempFilePath = req.file?.path;
 
-  try {
-    const channelId = activeChannelId;
+    try {
+      const channelId = activeChannelId;
 
       if (!channelId) {
         return res.status(400).json({
@@ -1042,6 +1128,7 @@ app.post(
       }
 
       const title = String(req.body.title || "").trim();
+
       const description = String(
         req.body.description || ""
       ).trim();
@@ -1057,7 +1144,9 @@ app.post(
         });
       }
 
-      if (!["private", "unlisted", "public"].includes(privacyStatus)) {
+      if (
+        !["private", "unlisted", "public"].includes(privacyStatus)
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid privacy setting."
@@ -1107,13 +1196,15 @@ app.post(
         videoUrl:
           "https://www.youtube.com/watch?v=" + result.data.id
       });
-          } catch (error) {
+
+    } catch (error) {
       console.error("YouTube upload error:", error.message);
 
       res.status(500).json({
         success: false,
         message: "Video upload failed. Check Render logs."
       });
+
     } finally {
       if (tempFilePath) {
         try {
@@ -1128,7 +1219,11 @@ app.post(
     }
   }
 );
+
+// =====================================
 // AUTO PUBLISH SCHEDULER
+// =====================================
+
 async function publishDueVideos() {
   try {
     const dueVideos = await pool.query(`
@@ -1178,7 +1273,10 @@ async function publishDueVideos() {
           [job.id]
         );
 
-        console.log("Scheduled video published:", job.video_id);
+        console.log(
+          "Scheduled video published:",
+          job.video_id
+        );
 
       } catch (error) {
         console.error(
@@ -1188,14 +1286,11 @@ async function publishDueVideos() {
         );
       }
     }
+
   } catch (error) {
     console.error("Scheduler error:", error.message);
   }
 }
-
-// =====================================
-// GEMINI AI SCRIPT GENERATION
-// =====================================
 
 // =====================================
 // GEMINI AI SCRIPT GENERATION
@@ -1262,7 +1357,8 @@ async function generateWithGemini(model, prompt, apiKey) {
         error.message
       );
 
-      const retryable = !error.status ||
+      const retryable =
+        !error.status ||
         [408, 429, 500, 503, 504].includes(error.status);
 
       if (!retryable) throw error;
@@ -1277,77 +1373,8 @@ async function generateWithGemini(model, prompt, apiKey) {
 }
 
 // =====================================
-// GEMINI AI AUTO THUMBNAIL GENERATOR
+// GEMINI AI SCRIPT GENERATION API
 // =====================================
-
-app.post("/api/generate-thumbnail", async (req, res) => {
-  try {
-    const token = process.env.CLOUDFLARE_API_TOKEN;
-    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-
-    if (!token || !accountId) {
-      return res.status(500).json({
-        success: false,
-        message: "Cloudflare credentials missing."
-      });
-    }
-
-    const { topic, language } = req.body || {};
-
-    if (!topic || typeof topic !== "string") {
-      return res.status(400).json({
-        success: false,
-        message: "Please enter a video topic."
-      });
-    }
-
-    const prompt = `
-Create a professional YouTube thumbnail.
-Topic: ${topic.trim().slice(0, 300)}
-Language: ${String(language || "Hindi").slice(0, 30)}
-Cinematic lighting, vibrant colors, beautiful composition,
-clear subject, attractive design, 16:9 aspect ratio.
-`;
-
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          prompt: prompt
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok || !data.success || !data.result?.image) {
-      console.error("Cloudflare error:", data.errors);
-      return res.status(502).json({
-        success: false,
-        message: "Cloudflare thumbnail generation failed."
-      });
-    }
-
-    res.json({
-      success: true,
-      mimeType: "image/png",
-      imageBase64: data.result.image
-    });
-
-  } catch (error) {
-    console.error("Thumbnail error:", error.message);
-
-    res.status(500).json({
-      success: false,
-      message: "Thumbnail generation server error."
-    });
-  }
-});
 
 app.post("/api/generate-script", async (req, res) => {
   try {
@@ -1395,13 +1422,13 @@ Do not add unnecessary explanations.
 `;
 
     const models = [
-      "gemini-3.8-flash",
-      "gemini-3.5-flash-lite"
+      process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      "gemini-2.5-flash-lite"
     ];
 
     let generatedScript = "";
 
-    for (const model of models) {
+    for (const model of [...new Set(models)]) {
       try {
         console.log("Trying Gemini model:", model);
 
@@ -1411,7 +1438,11 @@ Do not add unnecessary explanations.
           apiKey
         );
 
-        console.log("Script generated successfully:", model);
+        console.log(
+          "Script generated successfully:",
+          model
+        );
+
         break;
 
       } catch (error) {
@@ -1442,13 +1473,86 @@ Do not add unnecessary explanations.
       success: false,
       message: "Server error while generating script."
     });
-   }
- });
+  }
+});
 
- // =====================================
- // HINDI AI VOICEOVER - MP3 GENERATOR
- // =====================================
+// =====================================
+// GEMINI AI AUTO THUMBNAIL GENERATOR
+// CLOUDFLARE FLUX
+// =====================================
 
+app.post("/api/generate-thumbnail", async (req, res) => {
+  try {
+    const token = process.env.CLOUDFLARE_API_TOKEN;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+
+    if (!token || !accountId) {
+      return res.status(500).json({
+        success: false,
+        message: "Cloudflare credentials missing."
+      });
+    }
+
+    const { topic, language } = req.body || {};
+
+    if (!topic || typeof topic !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a video topic."
+      });
+    }
+
+    const prompt = `
+Create a professional YouTube thumbnail.
+Topic: ${topic.trim().slice(0, 300)}
+Language: ${String(language || "Hindi").slice(0, 30)}
+Cinematic lighting, vibrant colors, beautiful composition,
+clear subject, attractive design, 16:9 aspect ratio.
+`;
+
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success || !data.result?.image) {
+      console.error("Cloudflare error:", data.errors);
+
+      return res.status(502).json({
+        success: false,
+        message: "Cloudflare thumbnail generation failed."
+      });
+    }
+
+    res.json({
+      success: true,
+      mimeType: "image/png",
+      imageBase64: data.result.image
+    });
+
+  } catch (error) {
+    console.error("Thumbnail error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Thumbnail generation server error."
+    });
+  }
+});
+// =====================================
+// HINDI AI VOICEOVER - MP3 GENERATOR
+// =====================================
 
 app.post("/api/generate-voiceover", async (req, res) => {
   try {
@@ -1495,6 +1599,7 @@ app.post("/api/generate-voiceover", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
+
       console.error("India TTS error:", errorText);
 
       return res.status(502).json({
@@ -1523,7 +1628,6 @@ app.post("/api/generate-voiceover", async (req, res) => {
   }
 });
 
-
 // =====================================
 // UNKNOWN API ROUTE
 // =====================================
@@ -1535,7 +1639,6 @@ app.use("/api", (req, res) => {
   });
 });
 
-
 // =====================================
 // ERROR HANDLER
 // =====================================
@@ -1543,12 +1646,18 @@ app.use("/api", (req, res) => {
 app.use((err, req, res, next) => {
   console.error("Server error:", err.message);
 
-  res.status(500).json({
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(err.status || 500).json({
     success: false,
-    message: "Internal server error"
+    message:
+      err.status === 413
+        ? "Uploaded file is too large."
+        : "Internal server error"
   });
 });
-
 
 // =====================================
 // START SERVER
@@ -1556,13 +1665,26 @@ app.use((err, req, res, next) => {
 
 async function startServer() {
   try {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is missing.");
+    }
+
+    if (!SESSION_SECRET) {
+      throw new Error("SESSION_SECRET is missing.");
+    }
+
     await initializeDatabase();
+
+    cron.schedule("* * * * *", () => {
+      publishDueVideos();
+    });
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(
         `AI YouTube Manager server running on port ${PORT}`
       );
     });
+
   } catch (error) {
     console.error(
       "Database startup failed:",
