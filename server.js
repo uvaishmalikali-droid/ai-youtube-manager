@@ -143,7 +143,8 @@ app.post(
             await fs.promises.unlink(file);
           } catch {}
         }
-      }
+     }
+      editorBusy = false;
     };
 
     if (!videoPath || !audioPath) {
