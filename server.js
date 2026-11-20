@@ -47,7 +47,7 @@ app.use(cors({
     return callback(new Error("Origin not allowed"));
   }
 }));app.use(express.json({ limit: "1mb" }));
-const upload = multer({
+
  
 // =====================================
 // AI SMART EDITOR VIDEO + AUDIO UPLOAD
@@ -78,7 +78,7 @@ const editorUpload = multer({
     callback(null, true);
   }
 });
-
+  const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, callback) => {
       callback(null, os.tmpdir());
