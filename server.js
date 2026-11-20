@@ -102,6 +102,31 @@ const editorUpload = multer({
 // AI SMART EDITOR - VIDEO + MP3 MERGER
 // =====================================
 
+let editorBusy = false;
+
+function editorUploadGuard(req, res, next) {
+  if (editorBusy) {
+    return res.status(429).json({
+      success: false,
+      message: "Another video is being edited. Please try later."
+    });
+  }
+
+  editorBusy = true;
+
+  editorUpload.fields([
+    { name: "video", maxCount: 1 },
+    { name: "audio", maxCount: 1 }
+  ])(req, res, (error) => {
+    if (error) {
+      editorBusy = false;
+      return next(error);
+    }
+
+    next();
+  });
+}
+
 app.post(
   "/api/editor/merge",
   editorUpload.fields([
