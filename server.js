@@ -98,6 +98,97 @@ const editorUpload = multer({
   }
 });
 
+// =====================================
+// AI SMART EDITOR - VIDEO + MP3 MERGER
+// =====================================
+
+app.post(
+  "/api/editor/merge",
+  editorUpload.fields([
+    { name: "video", maxCount: 1 },
+    { name: "audio", maxCount: 1 }
+  ]),
+  async (req, res) => {
+    const videoPath = req.files?.video?.[0]?.path;
+    const audioPath = req.files?.audio?.[0]?.path;
+    const outputPath = os.tmpdir() + "/" + crypto.randomUUID() + ".mp4";
+
+    const cleanup = async () => {
+      for (const file of [videoPath, audioPath, outputPath]) {
+        if (file) {
+          try {
+            await fs.promises.unlink(file);
+          } catch {}
+        }
+      }
+    };
+
+    if (!videoPath || !audioPath) {
+      await cleanup();
+      return res.status(400).json({
+        success: false,
+        message: "Please upload both video and MP3 audio."
+      });
+    }
+
+    if (!ffmpegPath) {
+      await cleanup();
+      return res.status(500).json({
+        success: false,
+        message: "FFmpeg is not available."
+      });
+    }
+
+    const ffmpeg = spawn(ffmpegPath, [
+      "-y",
+      "-i", videoPath,
+      "-i", audioPath,
+      "-map", "0:v:0",
+      "-map", "1:a:0",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      outputPath
+    ]);
+
+    let errorOutput = "";
+
+    ffmpeg.stderr.on("data", data => {
+      errorOutput += data.toString();
+    });
+
+    ffmpeg.on("error", async () => {
+      await cleanup();
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Could not start video editor."
+        });
+      }
+    });
+
+    ffmpeg.on("close", async code => {
+      if (code !== 0) {
+        console.error("FFmpeg error:", errorOutput.slice(-2000));
+        await cleanup();
+
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: "Video editing failed."
+          });
+        }
+        return;
+      }
+
+      res.download(outputPath, "AI-Edited-Video.mp4", async () => {
+        await cleanup();
+      });
+    });
+  }
+);
+
 function verifyUploadSecret(req, res, next) {
   const secret = req.headers["x-upload-secret"];
 
