@@ -921,7 +921,7 @@ async function mergeEditorVideo() {
 
   formData.append("video", videoFile);
   formData.append("audio", audioFile);
-
+formData.append("script", document.getElementById("script").value);
   button.disabled = true;
   button.textContent = "⏳ Editing Video...";
 
