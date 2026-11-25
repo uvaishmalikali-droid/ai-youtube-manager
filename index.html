@@ -414,6 +414,28 @@ footer {
     accept="audio/mpeg,audio/mp3,audio/*"
   >
 
+<hr>
+
+<h3>🎙️ अपनी आवाज़ रिकॉर्ड करें</h3>
+
+<button type="button" id="startVoiceRecord" class="red">
+  🔴 Start Recording
+</button>
+
+<button type="button" id="stopVoiceRecord" class="blue" disabled>
+  ⏹ Stop Recording
+</button>
+
+<div id="recordStatus" class="status">
+  Recording के लिए तैयार।
+</div>
+
+<audio
+  id="myRecordedAudio"
+  controls
+  style="width:100%;display:none;margin-top:12px"
+></audio>
+
   <div id="editorStatus" class="status">
     Video और MP3 चुनने के लिए तैयार।
   </div>
