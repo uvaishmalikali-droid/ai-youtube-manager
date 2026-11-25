@@ -488,6 +488,86 @@ let thumbnailData = null;
 let voiceoverData = null;
 let editorDownloadUrl = null;
 
+// ==================================
+// MY OWN VOICE RECORDING
+// ==================================
+
+let editorRecordedAudioFile = null;
+let voiceRecorder = null;
+let voiceRecordingStream = null;
+let voiceChunks = [];
+
+document.getElementById("startVoiceRecord")
+.addEventListener("click", async function() {
+
+  try {
+    voiceRecordingStream =
+      await navigator.mediaDevices.getUserMedia({
+        audio: true
+      });
+
+    voiceChunks = [];
+
+    voiceRecorder = new MediaRecorder(voiceRecordingStream);
+
+    voiceRecorder.ondataavailable = function(event) {
+      if (event.data.size > 0) {
+        voiceChunks.push(event.data);
+      }
+    };
+
+    voiceRecorder.onstop = function() {
+
+      const blob = new Blob(voiceChunks, {
+        type: voiceRecorder.mimeType || "audio/webm"
+      });
+
+      editorRecordedAudioFile = new File(
+        [blob],
+        "My-Own-Voice.webm",
+        { type: blob.type }
+      );
+
+      const audio = document.getElementById("myRecordedAudio");
+
+      audio.src = URL.createObjectURL(blob);
+      audio.style.display = "block";
+
+      document.getElementById("recordStatus").textContent =
+        "✅ आपकी आवाज़ रिकॉर्ड हो गई है।";
+
+      voiceRecordingStream.getTracks().forEach(track => {
+        track.stop();
+      });
+    };
+
+    voiceRecorder.start();
+
+    this.disabled = true;
+
+    document.getElementById("stopVoiceRecord").disabled = false;
+
+    document.getElementById("recordStatus").textContent =
+      "🔴 Recording चालू है...";
+
+  } catch (error) {
+
+    document.getElementById("recordStatus").textContent =
+      "Microphone Error: " + error.message;
+  }
+});
+
+document.getElementById("stopVoiceRecord")
+.addEventListener("click", function() {
+
+  if (voiceRecorder && voiceRecorder.state === "recording") {
+
+    voiceRecorder.stop();
+
+    document.getElementById("startVoiceRecord").disabled = false;
+    this.disabled = true;
+  }
+});
 
 // ==================================
 // YOUTUBE CONNECT
