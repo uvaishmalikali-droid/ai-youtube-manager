@@ -435,7 +435,30 @@ footer {
   controls
   style="width:100%;display:none;margin-top:12px"
 ></audio>
+<hr>
+<h3>✨ AUTO AI CAPTIONS</h3>
 
+<label>Caption Language</label>
+<select id="captionLanguage">
+  <option value="hi">Hindi</option>
+  <option value="en">English</option>
+  <option value="ur">Urdu</option>
+</select>
+
+<label>Caption Style</label>
+<select id="captionStyle">
+  <option value="karaoke">Word-by-Word Karaoke</option>
+  <option value="sentence">Full Sentence</option>
+  <option value="both">Both Styles</option>
+</select>
+
+<div id="captionStatus" class="status">
+  Auto Captions तैयार हैं।
+</div>
+
+<div id="captionPreview" class="card">
+  Captions Preview यहाँ दिखाई देगा।
+</div>
   <div id="editorStatus" class="status">
     Video और MP3 चुनने के लिए तैयार।
   </div>
