@@ -1000,8 +1000,9 @@ async function mergeEditorVideo() {
     document.getElementById("editorVideo").files[0];
 
   const audioFile =
-    document.getElementById("editorAudio").files[0];
-
+  document.getElementById("editorAudio").files[0] ||
+  editorRecordedAudioFile;
+  
   const status =
     document.getElementById("editorStatus");
 
@@ -1009,10 +1010,10 @@ async function mergeEditorVideo() {
     document.getElementById("editorButton");
 
   if (!videoFile || !audioFile) {
-    status.textContent =
-      "कृपया Video और MP3 दोनों चुनें।";
-    return;
-  }
+  status.textContent =
+    "कृपया Video चुनें और Audio Upload करें या अपनी आवाज़ Record करें।";
+  return;
+}
 
   if (editorDownloadUrl) {
     URL.revokeObjectURL(editorDownloadUrl);
