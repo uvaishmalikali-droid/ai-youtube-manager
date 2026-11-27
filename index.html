@@ -1019,7 +1019,75 @@ async function uploadVideo() {
   }
 }
 
+// ================================
+// GENERATE AUTO CAPTIONS
+// ================================
 
+async function generateAutoCaptions() {
+  const status = document.getElementById("captionStatus");
+  const preview = document.getElementById("captionPreview");
+
+  const audioFile =
+    document.getElementById("editorAudio").files[0] ||
+    editorRecordedAudioFile;
+
+  if (!audioFile) {
+    status.textContent = "पहले Audio Upload या अपनी आवाज़ Record करें।";
+    return;
+  }
+
+  const formData = new FormData();
+
+  formData.append("audio", audioFile);
+  formData.append(
+    "language",
+    document.getElementById("captionLanguage").value
+  );
+
+  status.textContent = "✨ AI Captions बनाए जा रहे हैं...";
+  preview.textContent = "कृपया प्रतीक्षा करें...";
+
+  try {
+    const response = await fetch(
+      API_URL + "/api/editor/captions",
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Caption generation failed.");
+    }
+
+    preview.textContent = data.words
+      .map(item => item.word)
+      .join(" ");
+
+    status.textContent = "✅ Captions तैयार हैं!";
+
+    const blob = new Blob(
+      [data.srt],
+      { type: "text/plain;charset=utf-8" }
+    );
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "AI-Captions.srt";
+    link.click();
+
+    URL.revokeObjectURL(url);
+
+  } catch (error) {
+    status.textContent = "Error: " + error.message;
+    preview.textContent = "Captions नहीं बन पाए।";
+  }
+}
+  
 // ==================================
 // AI SMART EDITOR - Uvesh Pro
 // ==================================
