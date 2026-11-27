@@ -290,7 +290,169 @@ app.post(
     });
   }
 );
+// ================================
+// AI AUTO CAPTIONS API
+// ================================
 
+app.post(
+  "/api/editor/captions",
+  editorUploadGuard,
+  async (req, res) => {
+    const audioFile = req.files?.audio?.[0];
+    const files = Object.values(req.files || {}).flat();
+
+    try {
+      if (!audioFile) {
+        return res.status(400).json({
+          success: false,
+          message: "Audio file is required."
+        });
+      }
+
+      if (audioFile.size > 18 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          message: "Audio file must be under 18 MB."
+        });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.status(500).json({
+          success: false,
+          message: "Gemini API key is missing."
+        });
+      }
+
+      const language = String(
+        req.body?.language || "hi"
+      );
+
+      const audioBase64 = (
+        await fs.promises.readFile(audioFile.path)
+      ).toString("base64");
+
+      const prompt = `
+Transcribe this audio in the requested language:
+${language}
+
+Return ONLY valid JSON in this format:
+{
+  "words": [
+    {"word":"Hello","start":0.0,"end":0.5}
+  ]
+}
+
+Include every spoken word in order.
+Give each word its approximate start and end time in seconds.
+Do not invent words.
+`;
+
+      const model =
+        process.env.GEMINI_MODEL || "gemini-3.5-flash";
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            contents: [{
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: audioFile.mimetype,
+                    data: audioBase64
+                  }
+                }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: "application/json"
+            }
+          })
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error?.message || "Gemini API error"
+        );
+      }
+
+      const output =
+        result.candidates?.[0]?.content?.parts
+          ?.map(part => part.text || "")
+          .join("");
+
+      if (!output) {
+        throw new Error("No caption text returned.");
+      }
+
+      const parsed = JSON.parse(output);
+      const words = parsed.words;
+
+      if (!Array.isArray(words) || !words.length) {
+        throw new Error("No words found in audio.");
+      }
+
+      const srtTime = seconds => {
+        const ms = Math.max(
+          0,
+          Math.round(Number(seconds) * 1000)
+        );
+
+        const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
+        const m = String(Math.floor(ms / 60000) % 60).padStart(2, "0");
+        const s = String(Math.floor(ms / 1000) % 60).padStart(2, "0");
+        const milli = String(ms % 1000).padStart(3, "0");
+
+        return `${h}:${m}:${s},${milli}`;
+      };
+
+      const srt = words.map((item, index) => {
+        const start = Number(item.start) || 0;
+        const end = Math.max(start + 0.1, Number(item.end) || start + 0.3);
+
+        return `${index + 1}
+${srtTime(start)} --> ${srtTime(end)}
+${item.word}`;
+      }).join("\n\n");
+
+      return res.json({
+        success: true,
+        language,
+        words,
+        srt
+      });
+
+    } catch (error) {
+      console.error("Auto captions error:", error.message);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message
+      });
+
+    } finally {
+      for (const file of files) {
+        try {
+          await fs.promises.unlink(file.path);
+        } catch (error) {}
+      }
+
+      editorBusy = false;
+    }
+  }
+);
 // =====================================
 // TOKEN ENCRYPTION
 // =====================================
