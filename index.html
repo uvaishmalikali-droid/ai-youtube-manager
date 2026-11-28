@@ -389,6 +389,73 @@ footer {
   </div>
 </section>
 
+
+<!-- AI EDITING BOT -->
+<section class="card" id="aiEditingBot">
+  <h2>🧠 AI Editing Bot <span class="gold">SMART & UPDATABLE</span></h2>
+  <p class="small">
+    Topic ko samajhkar दमदार शुरुआत (HOOK), Shorts editing plan, cuts, zooms,
+    captions aur effects ke ideas dega. Aage ke updates mein aapki pasand aur
+    feedback ko save karke recommendations behtar banane ka support rahega.
+  </p>
+
+  <label>Video Topic:</label>
+  <input id="botTopic" type="text" placeholder="Video kis topic par hai?">
+
+  <label>Video ka type:</label>
+  <select id="botCategory">
+    <option value="YouTube Shorts">YouTube Shorts</option>
+    <option value="Islamic">Islamic Video</option>
+    <option value="Education">Education</option>
+    <option value="Storytelling">Storytelling</option>
+    <option value="News">News</option>
+    <option value="Entertainment">Entertainment</option>
+    <option value="Other">Other</option>
+  </select>
+
+  <label>Language:</label>
+  <select id="botLanguage">
+    <option value="Hindi">Hindi</option>
+    <option value="English">English</option>
+    <option value="Urdu">Urdu</option>
+  </select>
+
+  <label>Editing Style:</label>
+  <select id="botStyle">
+    <option value="Powerful and engaging">Powerful & Engaging</option>
+    <option value="Storytelling">Storytelling</option>
+    <option value="News">News</option>
+    <option value="Emotional">Emotional</option>
+    <option value="Islamic cinematic">Islamic Cinematic</option>
+  </select>
+
+  <label>Audience / Extra instructions:</label>
+  <textarea id="botInstructions" placeholder="Audience kaun hai? Koi khaas editing style ya instruction?"></textarea>
+
+  <button class="blue" id="editingBotButton" onclick="askEditingBot()">
+    ⚡ दमदार Hook और Editing Plan बनाएँ
+  </button>
+
+  <div id="editingBotStatus" class="status">
+    AI Editing Bot तैयार है।
+  </div>
+
+  <h3>🔥 शुरुआत का दमदार Hook</h3>
+  <textarea id="botHook" placeholder="Aapka powerful opening hook yahan aayega..." readonly></textarea>
+
+  <h3>🎬 पूरा Editing Plan</h3>
+  <textarea id="botPlan" placeholder="Cuts, zooms, captions, effects aur scene-by-scene plan yahan aayega..." readonly></textarea>
+
+  <label>Bot ko feedback dein (taaki future recommendations behtar ho):</label>
+  <textarea id="botFeedback" placeholder="Kya achha laga? Kya badalna chahiye?"></textarea>
+  <button class="green" onclick="saveEditingBotFeedback()">
+    💾 Feedback Save Karein
+  </button>
+  <div id="botFeedbackStatus" class="status">
+    Feedback abhi save nahi hua.
+  </div>
+</section>
+
 <!-- SMART EDITOR -->
 <section class="card">
   <h2>
@@ -397,7 +464,7 @@ footer {
   </h2>
 
   <p class="small">
-    अपना Video और MP3 Audio चुनें। Smart Editor वीडियो में नया ऑडियो लगाएगा और तैयार MP4 डाउनलोड करने देगा।
+    अपना Video चुनें। Video mein awaaz ho to captions usi se banenge; awaaz na ho to MP3 ya apni recorded voice use hogi.
   </p>
 
   <label>1. अपना Video चुनें:</label>
@@ -478,7 +545,7 @@ footer {
   </button>
 
   <p class="small">
-    नोट: अभी यह फीचर वीडियो का पुराना ऑडियो हटाकर चुना हुआ नया ऑडियो लगाता है। Smart Cuts और Hindi Captions अभी इसमें शामिल नहीं हैं।
+    नोट: Auto Captions video ki original awaaz ko pehle use karta hai. Agar video mein awaaz nahi hai, to uploaded MP3 ya aapki recorded voice use hoti hai. Captions MP4 mein burn hote hain aur SRT alag download hoti hai. Advanced Smart Cuts/Transitions future upgrade hain.
   </p>
 </section>
 
@@ -1026,68 +1093,97 @@ async function uploadVideo() {
 async function generateAutoCaptions() {
   const status = document.getElementById("captionStatus");
   const preview = document.getElementById("captionPreview");
-
+  const videoFile = document.getElementById("editorVideo").files[0];
   const audioFile =
     document.getElementById("editorAudio").files[0] ||
     editorRecordedAudioFile;
-const videoFile = document.getElementById("editorVideo").files[0];
-  if (!audioFile) {
-    status.textContent = "पहले Audio Upload या अपनी आवाज़ Record करें।";
+
+  if (!videoFile && !audioFile) {
+    status.textContent = "Pehle video upload karein, ya audio/voice record karein.";
     return;
   }
 
-  const formData = new FormData();
-
-  formData.append("audio", audioFile);
-  formData.append(
-    "language",
-    document.getElementById("captionLanguage").value
-  );
-
-  status.textContent = "✨ AI Captions बनाए जा रहे हैं...";
-  preview.textContent = "कृपया प्रतीक्षा करें...";
+  status.textContent = "✨ Video ki awaaz check ho rahi hai aur AI captions bana raha hai...";
+  preview.textContent = "Please wait...";
 
   try {
-    const response = await fetch(
-      API_URL + "/api/editor/captions",
-      {
-        method: "POST",
-        body: formData
-      }
-    );
+    const captionForm = new FormData();
+    if (videoFile) captionForm.append("video", videoFile);
+    if (audioFile) captionForm.append("audio", audioFile);
+    captionForm.append("language", document.getElementById("captionLanguage").value);
+    captionForm.append("style", document.getElementById("captionStyle").value);
 
-    const data = await response.json();
+    const captionResponse = await fetch(API_URL + "/api/editor/captions", {
+      method: "POST",
+      body: captionForm
+    });
+    const captionData = await captionResponse.json();
 
-    if (!response.ok || !data.success) {
-      throw new Error(data.message || "Caption generation failed.");
+    if (!captionResponse.ok || !captionData.success) {
+      throw new Error(captionData.message || "Caption generation failed.");
     }
 
-    preview.textContent = data.words
-      .map(item => item.word)
-      .join(" ");
+    preview.textContent = captionData.words.map(item => item.word).join(" ");
+    status.textContent = captionData.source === "video-audio"
+      ? "✅ Video ki apni awaaz se captions bane. Ab video par captions lag rahe hain..."
+      : "✅ Uploaded/recorded audio se captions bane. Ab video par captions lag rahe hain...";
 
-    status.textContent = "✅ Captions तैयार हैं!";
+    const srtBlob = new Blob([captionData.srt], { type: "text/plain;charset=utf-8" });
+    const srtUrl = URL.createObjectURL(srtBlob);
+    const srtLink = document.createElement("a");
+    srtLink.href = srtUrl;
+    srtLink.download = "AI-Captions.srt";
+    document.body.appendChild(srtLink);
+    srtLink.click();
+    srtLink.remove();
+    setTimeout(() => URL.revokeObjectURL(srtUrl), 1500);
 
-    const blob = new Blob(
-      [data.srt],
-      { type: "text/plain;charset=utf-8" }
-    );
+    if (!videoFile) {
+      status.textContent = "✅ Captions aur SRT taiyar hain. Video upload karenge to captions video par burn ho sakenge.";
+      return;
+    }
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const burnForm = new FormData();
+    burnForm.append("video", videoFile);
+    // Fallback audio is sent only when the uploaded video has no audio.
+    if (captionData.source !== "video-audio" && audioFile) {
+      burnForm.append("audio", audioFile);
+    }
+    burnForm.append("srt", captionData.srt);
 
-    link.href = url;
-    link.download = "AI-Captions.srt";
-    link.click();
+    const burnResponse = await fetch(API_URL + "/api/editor/captions/burn", {
+      method: "POST",
+      body: burnForm
+    });
 
-    URL.revokeObjectURL(url);
+    if (!burnResponse.ok) {
+      let message = "Captions video par nahi lag paye.";
+      try {
+        const errorData = await burnResponse.json();
+        message = errorData.message || message;
+      } catch {}
+      throw new Error(message);
+    }
 
+    const videoBlob = await burnResponse.blob();
+    if (!videoBlob.size) throw new Error("Captioned video file empty hai.");
+
+    const videoUrl = URL.createObjectURL(videoBlob);
+    const videoLink = document.createElement("a");
+    videoLink.href = videoUrl;
+    videoLink.download = "AI-Captioned-Video.mp4";
+    document.body.appendChild(videoLink);
+    videoLink.click();
+    videoLink.remove();
+    setTimeout(() => URL.revokeObjectURL(videoUrl), 30000);
+
+    status.textContent = "🎉 Done! Caption wala MP4 aur AI-Captions.srt download ho gaye.";
   } catch (error) {
     status.textContent = "Error: " + error.message;
-    preview.textContent = "Captions नहीं बन पाए।";
+    preview.textContent = "Captions complete nahi ho paye.";
   }
 }
-  
+
 // ==================================
 // AI SMART EDITOR - Uvesh Pro
 // ==================================
@@ -1170,6 +1266,94 @@ formData.append("script", document.getElementById("script").value);
   } finally {
     button.disabled = false;
     button.textContent = "✨ Edit Video & Download";
+  }
+}
+
+
+
+// ==================================
+// AI EDITING BOT
+// Backend API is added in the next server.js update.
+// ==================================
+
+async function askEditingBot() {
+  const topic = document.getElementById("botTopic").value.trim();
+  const status = document.getElementById("editingBotStatus");
+  const hookBox = document.getElementById("botHook");
+  const planBox = document.getElementById("botPlan");
+  const button = document.getElementById("editingBotButton");
+
+  if (!topic) {
+    status.textContent = "Pehle video ka topic likhein.";
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "⏳ AI plan bana raha hai...";
+  status.textContent = "Topic analyze ho raha hai aur powerful opening hook ban raha hai...";
+  hookBox.value = "";
+  planBox.value = "";
+
+  try {
+    const response = await fetch(API_URL + "/api/editor/bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: topic,
+        category: document.getElementById("botCategory").value,
+        language: document.getElementById("botLanguage").value,
+        style: document.getElementById("botStyle").value,
+        instructions: document.getElementById("botInstructions").value.trim()
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Editing Bot abhi response nahi de paya.");
+    }
+
+    hookBox.value = data.hook || "Hook response nahi mila.";
+    planBox.value = data.plan || data.editingPlan || "Editing plan response nahi mila.";
+    status.textContent = "✅ Hook aur Editing Plan taiyar hain.";
+  } catch (error) {
+    status.textContent = "Bot API abhi backend mein add nahi hui ya server error hai: " + error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "⚡ दमदार Hook और Editing Plan बनाएँ";
+  }
+}
+
+async function saveEditingBotFeedback() {
+  const topic = document.getElementById("botTopic").value.trim();
+  const feedback = document.getElementById("botFeedback").value.trim();
+  const status = document.getElementById("botFeedbackStatus");
+
+  if (!topic || !feedback) {
+    status.textContent = "Topic aur feedback dono likhein.";
+    return;
+  }
+
+  status.textContent = "Feedback save karne ki koshish ho rahi hai...";
+  try {
+    const response = await fetch(API_URL + "/api/editor/bot/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: topic,
+        category: document.getElementById("botCategory").value,
+        language: document.getElementById("botLanguage").value,
+        style: document.getElementById("botStyle").value,
+        feedback: feedback
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || "Feedback save nahi hua.");
+    }
+    status.textContent = "✅ Feedback save ho gaya. Isse future bot updates mein use kiya ja sakega.";
+  } catch (error) {
+    status.textContent = "Feedback save API abhi server.js mein add honi baaki hai: " + error.message;
   }
 }
 
