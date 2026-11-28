@@ -291,6 +291,132 @@ app.post(
     });
   }
 );
+
+// ================================
+// AI CAPTIONS BURN INTO VIDEO API
+// ================================
+
+app.post(
+  "/api/editor/captions/burn",
+  editorUploadGuard,
+  async (req, res) => {
+    const videoFile = req.files?.video?.[0];
+    const srt = String(req.body?.srt || "");
+
+    const srtPath = path.join(
+      os.tmpdir(),
+      crypto.randomUUID() + ".srt"
+    );
+
+    const outputPath = path.join(
+      os.tmpdir(),
+      crypto.randomUUID() + "-captioned.mp4"
+    );
+
+    let ffmpeg = null;
+    let cleaned = false;
+
+    const cleanup = async () => {
+      if (cleaned) return;
+      cleaned = true;
+
+      for (const file of [videoFile?.path, srtPath, outputPath]) {
+        if (file) {
+          try {
+            await fs.promises.unlink(file);
+          } catch (error) {}
+        }
+      }
+
+      editorBusy = false;
+    };
+
+    try {
+      if (!videoFile) {
+        throw new Error("Please upload a video.");
+      }
+
+      if (!srt.trim()) {
+        throw new Error("Caption SRT is missing.");
+      }
+
+      if (!ffmpegPath) {
+        throw new Error("FFmpeg is not available.");
+      }
+
+      await fs.promises.writeFile(srtPath, srt, "utf8");
+
+      ffmpeg = spawn(ffmpegPath, [
+        "-y",
+        "-i", videoFile.path,
+        "-vf", `subtitles=${srtPath}`,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputPath
+      ]);
+
+      let errorOutput = "";
+
+      ffmpeg.stderr.on("data", data => {
+        errorOutput += data.toString();
+      });
+
+      ffmpeg.on("error", async error => {
+        console.error("Caption FFmpeg error:", error.message);
+        await cleanup();
+
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: "Could not start caption editor."
+          });
+        }
+      });
+
+      ffmpeg.on("close", async code => {
+        if (code !== 0) {
+          console.error("Caption burn error:", errorOutput.slice(-2000));
+          await cleanup();
+
+          if (!res.headersSent) {
+            res.status(500).json({
+              success: false,
+              message: "Caption burning failed."
+            });
+          }
+          return;
+        }
+
+        res.download(
+          outputPath,
+          "AI-Captioned-Video.mp4",
+          async error => {
+            if (error) {
+              console.error("Caption download error:", error.message);
+            }
+            await cleanup();
+          }
+        );
+      });
+
+    } catch (error) {
+      console.error("Caption burn error:", error.message);
+      await cleanup();
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: error.message
+        });
+      }
+    }
+  }
+);
+
 // ================================
 // AI AUTO CAPTIONS API
 // ================================
