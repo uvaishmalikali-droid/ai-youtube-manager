@@ -1030,7 +1030,7 @@ async function generateAutoCaptions() {
   const audioFile =
     document.getElementById("editorAudio").files[0] ||
     editorRecordedAudioFile;
-
+const videoFile = document.getElementById("editorVideo").files[0];
   if (!audioFile) {
     status.textContent = "पहले Audio Upload या अपनी आवाज़ Record करें।";
     return;
