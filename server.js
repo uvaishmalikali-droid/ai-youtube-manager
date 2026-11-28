@@ -176,6 +176,44 @@ function editorUploadGuard(req, res, next) {
   });
 }
 
+
+// =====================================
+// EDITOR MEDIA HELPERS
+// =====================================
+
+function editorHasAudio(filePath) {
+  return new Promise((resolve, reject) => {
+    const probe = spawn(ffmpegPath, ["-i", filePath, "-f", "null", "-"]);
+    let stderr = "";
+
+    probe.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+
+    probe.on("error", reject);
+    probe.on("close", () => {
+      resolve(/Audio:/i.test(stderr));
+    });
+  });
+}
+
+function editorRunFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const process = spawn(ffmpegPath, args);
+    let stderr = "";
+
+    process.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+
+    process.on("error", reject);
+    process.on("close", code => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.slice(-1800) || "FFmpeg processing failed."));
+    });
+  });
+}
+
 app.post(
   "/api/editor/merge",
   editorUploadGuard,
@@ -301,54 +339,41 @@ app.post(
   editorUploadGuard,
   async (req, res) => {
     const videoFile = req.files?.video?.[0];
+    const fallbackAudio = req.files?.audio?.[0];
     const srt = String(req.body?.srt || "");
-
-    const srtPath = path.join(
-      os.tmpdir(),
-      crypto.randomUUID() + ".srt"
-    );
-
-    const outputPath = path.join(
-      os.tmpdir(),
-      crypto.randomUUID() + "-captioned.mp4"
-    );
-
-    let ffmpeg = null;
+    const srtPath = path.join(os.tmpdir(), crypto.randomUUID() + ".srt");
+    const outputPath = path.join(os.tmpdir(), crypto.randomUUID() + "-captioned.mp4");
     let cleaned = false;
 
     const cleanup = async () => {
       if (cleaned) return;
       cleaned = true;
-
-      for (const file of [videoFile?.path, srtPath, outputPath]) {
+      for (const file of [videoFile?.path, fallbackAudio?.path, srtPath, outputPath]) {
         if (file) {
-          try {
-            await fs.promises.unlink(file);
-          } catch (error) {}
+          try { await fs.promises.unlink(file); } catch (error) {}
         }
       }
-
       editorBusy = false;
     };
 
     try {
-      if (!videoFile) {
-        throw new Error("Please upload a video.");
-      }
+      if (!videoFile) throw new Error("Please upload a video.");
+      if (!srt.trim()) throw new Error("Caption SRT is missing.");
+      if (!ffmpegPath) throw new Error("FFmpeg is not available.");
 
-      if (!srt.trim()) {
-        throw new Error("Caption SRT is missing.");
-      }
-
-      if (!ffmpegPath) {
-        throw new Error("FFmpeg is not available.");
+      const videoHasAudio = await editorHasAudio(videoFile.path);
+      if (!videoHasAudio && !fallbackAudio) {
+        throw new Error("Video mein audio nahi hai. MP3 upload karein ya apni voice record karein.");
       }
 
       await fs.promises.writeFile(srtPath, srt, "utf8");
 
-      ffmpeg = spawn(ffmpegPath, [
-        "-y",
-        "-i", videoFile.path,
+      const args = ["-y", "-i", videoFile.path];
+      if (!videoHasAudio && fallbackAudio) args.push("-i", fallbackAudio.path);
+
+      args.push(
+        "-map", "0:v:0",
+        ...(videoHasAudio ? ["-map", "0:a:0?"] : ["-map", "1:a:0"]),
         "-vf", `subtitles=${srtPath}`,
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -356,67 +381,26 @@ app.post(
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
+        "-shortest",
         outputPath
-      ]);
+      );
 
-      let errorOutput = "";
+      await editorRunFfmpeg(args);
 
-      ffmpeg.stderr.on("data", data => {
-        errorOutput += data.toString();
-      });
-
-      ffmpeg.on("error", async error => {
-        console.error("Caption FFmpeg error:", error.message);
+      res.download(outputPath, "AI-Captioned-Video.mp4", async error => {
+        if (error) console.error("Caption download error:", error.message);
         await cleanup();
-
-        if (!res.headersSent) {
-          res.status(500).json({
-            success: false,
-            message: "Could not start caption editor."
-          });
-        }
       });
-
-      ffmpeg.on("close", async code => {
-        if (code !== 0) {
-          console.error("Caption burn error:", errorOutput.slice(-2000));
-          await cleanup();
-
-          if (!res.headersSent) {
-            res.status(500).json({
-              success: false,
-              message: "Caption burning failed."
-            });
-          }
-          return;
-        }
-
-        res.download(
-          outputPath,
-          "AI-Captioned-Video.mp4",
-          async error => {
-            if (error) {
-              console.error("Caption download error:", error.message);
-            }
-            await cleanup();
-          }
-        );
-      });
-
     } catch (error) {
       console.error("Caption burn error:", error.message);
       await cleanup();
-
       if (!res.headersSent) {
-        res.status(500).json({
-          success: false,
-          message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
+        
       }
     }
   }
 );
-
 // ================================
 // AI AUTO CAPTIONS API
 // ================================
@@ -425,161 +409,129 @@ app.post(
   "/api/editor/captions",
   editorUploadGuard,
   async (req, res) => {
-    const audioFile = req.files?.audio?.[0];
-    const files = Object.values(req.files || {}).flat();
+    const videoFile = req.files?.video?.[0];
+    const uploadedAudio = req.files?.audio?.[0];
+    const allFiles = Object.values(req.files || {}).flat();
+    let extractedAudioPath = null;
 
     try {
-      if (!audioFile) {
-        return res.status(400).json({
-          success: false,
-          message: "Audio file is required."
-        });
+      if (!videoFile && !uploadedAudio) {
+        throw new Error("Video upload karein, ya audio/recorded voice dein.");
+      }
+      if (!ffmpegPath) throw new Error("FFmpeg is not available.");
+
+      let transcriptionFile = uploadedAudio;
+      let source = "uploaded-audio";
+      let mimeType = uploadedAudio?.mimetype || "audio/webm";
+
+      // Rule: if the selected video has its own audio, captions use that first.
+      if (videoFile) {
+        const videoHasAudio = await editorHasAudio(videoFile.path);
+        if (videoHasAudio) {
+          extractedAudioPath = path.join(os.tmpdir(), crypto.randomUUID() + ".wav");
+          await editorRunFfmpeg([
+            "-y", "-i", videoFile.path,
+            "-map", "0:a:0",
+            "-vn", "-ac", "1", "-ar", "16000",
+            "-t", "600",
+            extractedAudioPath
+          ]);
+          transcriptionFile = {
+            path: extractedAudioPath,
+            size: (await fs.promises.stat(extractedAudioPath)).size,
+            mimetype: "audio/wav"
+          };
+          mimeType = "audio/wav";
+          source = "video-audio";
+        } else if (uploadedAudio) {
+          source = "fallback-audio";
+        }
       }
 
-      if (audioFile.size > 18 * 1024 * 1024) {
-        return res.status(400).json({
-          success: false,
-          message: "Audio file must be under 18 MB."
-        });
+      if (!transcriptionFile) {
+        throw new Error("Video mein awaaz nahi mili. MP3 upload karein ya apni voice record karein.");
+      }
+      if (transcriptionFile.size > 18 * 1024 * 1024) {
+        throw new Error("Caption audio 18 MB se chhota hona chahiye.");
       }
 
       const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Gemini API key Render Environment mein missing hai.");
 
-      if (!apiKey) {
-        return res.status(500).json({
-          success: false,
-          message: "Gemini API key is missing."
-        });
-      }
-
-      const language = String(
-        req.body?.language || "hi"
-      );
-
-      const audioBase64 = (
-        await fs.promises.readFile(audioFile.path)
-      ).toString("base64");
+      const language = String(req.body?.language || "hi").slice(0, 10);
+      const languageNames = { hi: "Hindi", en: "English", ur: "Urdu" };
+      const audioBase64 = (await fs.promises.readFile(transcriptionFile.path)).toString("base64");
 
       const prompt = `
-Transcribe this audio in the requested language:
-${language}
-
-Return ONLY valid JSON in this format:
-{
-  "words": [
-    {"word":"Hello","start":0.0,"end":0.5}
-  ]
-}
-
-Include every spoken word in order.
-Give each word its approximate start and end time in seconds.
-Do not invent words.
+Transcribe the supplied audio accurately in ${languageNames[language] || language}.
+Return ONLY valid JSON:
+{"words":[{"word":"spoken word","start":0.0,"end":0.5}]}
+Include all spoken words in order. Give approximate word-level start/end times in seconds.
+Do not translate, invent, summarize, or omit speech. If speech is unclear, do not guess.
 `;
 
-      const model =
-        process.env.GEMINI_MODEL || "gemini-3.5-flash";
-
+      const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{
               role: "user",
               parts: [
                 { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: audioFile.mimetype,
-                    data: audioBase64
-                  }
-                }
+                { inlineData: { mimeType, data: audioBase64 } }
               ]
             }],
-            generationConfig: {
-              temperature: 0.1,
-              responseMimeType: "application/json"
-            }
+            generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
           })
         }
       );
 
       const result = await response.json();
-
       if (!response.ok) {
-        throw new Error(
-          result.error?.message || "Gemini API error"
-        );
+        throw new Error(result.error?.message || "Gemini transcription failed.");
       }
 
-      const output =
-        result.candidates?.[0]?.content?.parts
-          ?.map(part => part.text || "")
-          .join("");
-
-      if (!output) {
-        throw new Error("No caption text returned.");
-      }
+      const output = result.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("");
+      if (!output) throw new Error("Gemini ne caption text nahi diya.");
 
       const parsed = JSON.parse(output);
       const words = parsed.words;
-
-      if (!Array.isArray(words) || !words.length) {
-        throw new Error("No words found in audio.");
-      }
+      if (!Array.isArray(words) || !words.length) throw new Error("Audio mein speech nahi mili.");
 
       const srtTime = seconds => {
-        const ms = Math.max(
-          0,
-          Math.round(Number(seconds) * 1000)
-        );
-
+        const ms = Math.max(0, Math.round(Number(seconds) * 1000));
         const h = String(Math.floor(ms / 3600000)).padStart(2, "0");
         const m = String(Math.floor(ms / 60000) % 60).padStart(2, "0");
-        const s = String(Math.floor(ms / 1000) % 60).padStart(2, "0");
+        const sec = String(Math.floor(ms / 1000) % 60).padStart(2, "0");
         const milli = String(ms % 1000).padStart(3, "0");
-
-        return `${h}:${m}:${s},${milli}`;
+        return `${h}:${m}:${sec},${milli}`;
       };
 
       const srt = words.map((item, index) => {
-        const start = Number(item.start) || 0;
+        const start = Math.max(0, Number(item.start) || 0);
         const end = Math.max(start + 0.1, Number(item.end) || start + 0.3);
-
-        return `${index + 1}
-${srtTime(start)} --> ${srtTime(end)}
-${item.word}`;
+        return `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${String(item.word || "").trim()}`;
       }).join("\n\n");
 
-      return res.json({
-        success: true,
-        language,
-        words,
-        srt
-      });
-
+      return res.json({ success: true, language, words, srt, source });
     } catch (error) {
       console.error("Auto captions error:", error.message);
-
-      return res.status(500).json({
-        success: false,
-        message: error.message
-      });
-
+      return res.status(500).json({ success: false, message: error.message });
     } finally {
-      for (const file of files) {
-        try {
-          await fs.promises.unlink(file.path);
-        } catch (error) {}
+      for (const file of allFiles) {
+        try { await fs.promises.unlink(file.path); } catch (error) {}
       }
-
+      if (extractedAudioPath) {
+        try { await fs.promises.unlink(extractedAudioPath); } catch (error) {}
+      }
       editorBusy = false;
     }
   }
 );
+
 // =====================================
 // TOKEN ENCRYPTION
 // =====================================
@@ -846,7 +798,7 @@ async function selectChannel(channelId) {
 }
 
 async function getAllChannels() {
-  const result = await pool.query(
+    const result = await pool.query(
     `SELECT channel_id, channel, created_at
      FROM youtube_connections
      ORDER BY created_at ASC`
@@ -1245,8 +1197,8 @@ app.get("/auth/google/callback", async (req, res) => {
 app.get("/api/youtube/channels", async (req, res) => {
   try {
     const channels = await getAllChannels();
-
-    res.json({
+    
+      res.json({
       success: true,
       channels,
       activeChannelId
@@ -1645,8 +1597,7 @@ async function generateWithGemini(model, prompt, apiKey) {
         `Gemini ${model}, attempt ${attempt}:`,
         error.message
       );
-
-      const retryable =
+            const retryable =
         !error.status ||
         [408, 429, 500, 503, 504].includes(error.status);
 
@@ -1660,6 +1611,133 @@ async function generateWithGemini(model, prompt, apiKey) {
 
   throw lastError;
 }
+
+
+// =====================================
+// AI EDITING BOT + LEARNING FEEDBACK
+// =====================================
+
+app.post("/api/editor/bot", async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ success: false, message: "Gemini API key Render Environment mein missing hai." });
+    }
+
+    const { topic, category, language, style, instructions } = req.body || {};
+    if (typeof topic !== "string" || !topic.trim()) {
+      return res.status(400).json({ success: false, message: "Video topic likhein." });
+    }
+
+    // Use previously saved feedback as guidance so recommendations can improve over time.
+    let feedbackContext = "";
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS ai_editor_feedback (
+          id BIGSERIAL PRIMARY KEY,
+          topic TEXT NOT NULL,
+          category TEXT,
+          language TEXT,
+          style TEXT,
+          feedback TEXT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      const saved = await pool.query(
+        "SELECT feedback FROM ai_editor_feedback ORDER BY created_at DESC LIMIT 8"
+      );
+      feedbackContext = saved.rows.map(row => row.feedback).join("\n");
+    } catch (dbError) {
+      console.error("Editor feedback read warning:", dbError.message);
+    }
+
+    const safeTopic = topic.trim().slice(0, 500);
+    const safeCategory = String(category || "YouTube Shorts").slice(0, 60);
+    const safeLanguage = String(language || "Hindi").slice(0, 30);
+    const safeStyle = String(style || "Powerful and engaging").slice(0, 80);
+    const safeInstructions = String(instructions || "").slice(0, 1000);
+
+    const prompt = `
+You are an expert YouTube Shorts editor and creative director.
+Create an original, high-retention editing plan. The opening hook must be powerful,
+specific to the topic, honest, and immediately attention-grabbing. Do not use fake
+claims, misleading clickbait, or copy another creator.
+
+Topic: ${safeTopic}
+Video category: ${safeCategory}
+Output language: ${safeLanguage}
+Editing style: ${safeStyle}
+User instructions: ${safeInstructions}
+
+Recent user feedback to improve future recommendations:
+${feedbackContext || "No feedback has been saved yet."}
+
+Return ONLY valid JSON:
+{
+  "hook": "One strong opening line for the first 1-3 seconds",
+  "plan": "A practical scene-by-scene plan with timestamps, cuts, zoom suggestions, transitions, sound design, on-screen captions, and ending/CTA. Mention what can be done in the current editor and what is only a suggested future enhancement."
+}
+Use ${safeLanguage}. Keep it practical for a mobile Shorts creator.
+`;
+
+    const model = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+    const generated = await generateWithGemini(model, prompt, apiKey);
+    let parsed;
+    try {
+      const cleaned = generated.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = { hook: "", plan: generated };
+    }
+
+    return res.json({
+      success: true,
+      hook: String(parsed.hook || ""),
+      plan: String(parsed.plan || parsed.editingPlan || generated)
+    });
+  } catch (error) {
+    console.error("AI Editing Bot error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Editing Bot error." });
+  }
+});
+
+app.post("/api/editor/bot/feedback", async (req, res) => {
+  try {
+    const { topic, category, language, style, feedback } = req.body || {};
+    if (!String(topic || "").trim() || !String(feedback || "").trim()) {
+      return res.status(400).json({ success: false, message: "Topic aur feedback dono zaroori hain." });
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_editor_feedback (
+        id BIGSERIAL PRIMARY KEY,
+        topic TEXT NOT NULL,
+        category TEXT,
+        language TEXT,
+        style TEXT,
+        feedback TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(
+      `INSERT INTO ai_editor_feedback (topic, category, language, style, feedback)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        String(topic).slice(0, 500),
+        String(category || "").slice(0, 60),
+        String(language || "").slice(0, 30),
+        String(style || "").slice(0, 80),
+        String(feedback).slice(0, 1500)
+      ]
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Editor feedback save error:", error.message);
+    return res.status(500).json({ success: false, message: "Feedback save nahi ho saka. Database check karein." });
+  }
+});
 
 // =====================================
 // GEMINI AI SCRIPT GENERATION API
@@ -1910,7 +1988,7 @@ app.post("/api/generate-voiceover", async (req, res) => {
   } catch (error) {
     console.error("Voiceover error:", error.message);
 
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       message: "Voiceover server error."
     });
